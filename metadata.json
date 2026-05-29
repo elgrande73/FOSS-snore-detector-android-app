@@ -1,0 +1,6 @@
+{
+  "name": "Snore Detector",
+  "description": "An open-source (FOSS) real-time snoring detector suitable for F-Droid, featuring offline digital signal processing (RMS, ZCR, Band-Energy, Low-Frequency Energy Ratio), local Room database persistence, WAV audio capture, and beautiful Compose visualization graphs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
