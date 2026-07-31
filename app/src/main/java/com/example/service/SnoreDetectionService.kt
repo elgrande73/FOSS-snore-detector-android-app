@@ -185,15 +185,17 @@ class SnoreDetectionService : Service() {
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
                 _serviceError.value = "Hardware microphonic recording not supported"
+                _isServiceRunning.value = false
                 stopSelf()
                 return@launch
             }
 
-            // Ensure buffer size is larger than processing window (1024 shorts is 2048 bytes)
+            // Ensure buffer size is larger than processing window
             val finalBufferSize = (minBufferSize * 2).coerceAtLeast(4096)
 
+            var record: AudioRecord? = null
             try {
-                audioRecord = AudioRecord(
+                record = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
                     sampleRate,
                     channelConfig,
@@ -202,21 +204,33 @@ class SnoreDetectionService : Service() {
                 )
             } catch (e: SecurityException) {
                 _serviceError.value = "Microphone record audio permissions not granted"
+                _isServiceRunning.value = false
+                stopSelf()
+                return@launch
+            } catch (e: Exception) {
+                _serviceError.value = "Failed to initialize microphone hardware."
+                _isServiceRunning.value = false
                 stopSelf()
                 return@launch
             }
 
-            val record = audioRecord
-            if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
                 _serviceError.value = "Failed to initialize microphone hardware. Device might be busy."
+                try { record.release() } catch (_: Exception) {}
+                _isServiceRunning.value = false
                 stopSelf()
                 return@launch
             }
+
+            audioRecord = record
 
             try {
                 record.startRecording()
-            } catch (e: IllegalStateException) {
+            } catch (e: Exception) {
                 _serviceError.value = "Microphone is being locked by another application."
+                try { record.release() } catch (_: Exception) {}
+                audioRecord = null
+                _isServiceRunning.value = false
                 stopSelf()
                 return@launch
             }
@@ -245,193 +259,198 @@ class SnoreDetectionService : Service() {
             // Pre-allocate reading buffer (N=1024 samples)
             val audioBuffer = ShortArray(1024)
 
-            while (isActive && isRecording.get()) {
-                val readResult = record.read(audioBuffer, 0, audioBuffer.size)
-                if (readResult > 0) {
-                    val frameSamples = audioBuffer.copyOf(readResult)
-                    
-                    // Run signal processing algorithms
-                    val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
-
-                    // Post real-time analytics to dashboard flow
-                    _liveAnalysis.value = result
-
-                    // Aggregate timelines mapping sample dB (e.g., save 1 sample point every 500ms to save memory)
-                    val currentMillis = System.currentTimeMillis()
-                    if (currentMillis - timelineTimer >= 500L) {
-                        timelineTimer = currentMillis
-                        val point = AmplitudePoint(
-                            dbValue = result.db,
-                            isSnore = result.isSnoring,
-                            timestamp = currentMillis
-                        )
-                        accumulatedTimelinePoints.add(point)
-                        // Keep only first 25000 elements over many hours
-                        if (accumulatedTimelinePoints.size > 25000) {
-                            accumulatedTimelinePoints.removeAt(0)
-                        }
-                        _currentSessionData.value = ArrayList(accumulatedTimelinePoints)
+            try {
+                while (isActive && isRecording.get()) {
+                    val readResult = try {
+                        record.read(audioBuffer, 0, audioBuffer.size)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error reading audio buffer", e)
+                        -1
                     }
 
-                    // --- SNORE DETECTOR DEBOUNCE STATE MACHINE ---
-                    if (result.isSnoring) {
-                        if (!isSnoringActive) {
-                            // Initiating a new continuous snoring segment
-                            isSnoringActive = true
-                            snoreStartTime = currentMillis
-                            snoreAudioBuffer.clear()
-                            
-                            snoreSumDb = 0.0f
-                            snoreSumZcr = 0.0f
-                            snoreSumBandEnergy = 0.0f
-                            snoreSumLowFreqRatio = 0.0f
-                            snoreMaxRms = 0.0f
-                            snoreBlocksCount = 0
-                            
-                            _isCurrentlySnoring.value = true
-                            updateNotification("Snoring audio detected in progress...")
+                    if (!isRecording.get() || !isActive) break
+
+                    if (readResult > 0) {
+                        val frameSamples = audioBuffer.copyOf(readResult)
+                        
+                        // Run signal processing algorithms
+                        val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
+
+                        // Post real-time analytics to dashboard flow
+                        _liveAnalysis.value = result
+
+                        // Aggregate timelines mapping sample dB
+                        val currentMillis = System.currentTimeMillis()
+                        if (currentMillis - timelineTimer >= 500L) {
+                            timelineTimer = currentMillis
+                            val point = AmplitudePoint(
+                                dbValue = result.db,
+                                isSnore = result.isSnoring,
+                                timestamp = currentMillis
+                            )
+                            accumulatedTimelinePoints.add(point)
+                            if (accumulatedTimelinePoints.size > 25000) {
+                                accumulatedTimelinePoints.removeAt(0)
+                            }
+                            _currentSessionData.value = ArrayList(accumulatedTimelinePoints)
                         }
 
-                        // Accumulate audio clips (up to max 12 seconds per file to avoid RAM issues)
-                        if (snoreAudioBuffer.size < 187) { // 187 * 1024 samples ≈ 12 seconds
-                            snoreAudioBuffer.add(frameSamples)
-                        }
-
-                        // Accumulate values
-                        snoreSumDb += result.db
-                        snoreSumZcr += result.zcr
-                        snoreSumBandEnergy += result.bandEnergy
-                        snoreSumLowFreqRatio += result.lowFreqEnergyRatio
-                        snoreMaxRms = snoreMaxRms.coerceAtLeast(result.rms)
-                        snoreBlocksCount++
-
-                        snoreLastDetectedTime = currentMillis
-
-                    } else {
-                        // Current frame is quiet, check if we are in an active snore event
-                        if (isSnoringActive) {
-                            // Debounce: we allow up to 2.5 seconds of silence before finalizing the snore event.
-                            val elapsedSilenceMs = currentMillis - snoreLastDetectedTime
-                            
-                            if (elapsedSilenceMs >= 2500L) {
-                                // FINALISE continuous snoring incident
-                                val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
+                        // --- SNORE DETECTOR DEBOUNCE STATE MACHINE ---
+                        if (result.isSnoring) {
+                            if (!isSnoringActive) {
+                                isSnoringActive = true
+                                snoreStartTime = currentMillis
+                                snoreAudioBuffer.clear()
                                 
-                                // Only save if the event lasted longer than 1.0 seconds (filters out small knocks/coughs)
-                                if (durationSec >= 1.0 && snoreBlocksCount > 0) {
-                                    val avgDb = snoreSumDb / snoreBlocksCount
-                                    val avgZcr = snoreSumZcr / snoreBlocksCount
-                                    val avgBand = snoreSumBandEnergy / snoreBlocksCount
-                                    val avgLowFreq = snoreSumLowFreqRatio / snoreBlocksCount
+                                snoreSumDb = 0.0f
+                                snoreSumZcr = 0.0f
+                                snoreSumBandEnergy = 0.0f
+                                snoreSumLowFreqRatio = 0.0f
+                                snoreMaxRms = 0.0f
+                                snoreBlocksCount = 0
+                                
+                                _isCurrentlySnoring.value = true
+                                updateNotification("Snoring audio detected in progress...")
+                            }
 
-                                    var savedAudioPath: String? = null
+                            if (snoreAudioBuffer.size < 187) {
+                                snoreAudioBuffer.add(frameSamples)
+                            }
+
+                            snoreSumDb += result.db
+                            snoreSumZcr += result.zcr
+                            snoreSumBandEnergy += result.bandEnergy
+                            snoreSumLowFreqRatio += result.lowFreqEnergyRatio
+                            snoreMaxRms = snoreMaxRms.coerceAtLeast(result.rms)
+                            snoreBlocksCount++
+
+                            snoreLastDetectedTime = currentMillis
+
+                        } else {
+                            if (isSnoringActive) {
+                                val elapsedSilenceMs = currentMillis - snoreLastDetectedTime
+                                
+                                if (elapsedSilenceMs >= 2500L) {
+                                    val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
                                     
-                                    if (isSaveClipsEnabled && snoreAudioBuffer.isNotEmpty()) {
-                                        try {
-                                            val dir = File(applicationContext.filesDir, "snore_clips")
-                                            if (!dir.exists()) dir.mkdirs()
-                                            
-                                            val clipFile = File(dir, "snore_${snoreStartTime}.wav")
-                                            WavWriter.saveWavFile(clipFile, sampleRate, snoreAudioBuffer)
-                                            savedAudioPath = clipFile.absolutePath
-                                        } catch (e: Exception) {
-                                            Log.e(TAG, "WAV write failed", e)
+                                    if (durationSec >= 1.0 && snoreBlocksCount > 0) {
+                                        val avgDb = snoreSumDb / snoreBlocksCount
+                                        val avgZcr = snoreSumZcr / snoreBlocksCount
+                                        val avgBand = snoreSumBandEnergy / snoreBlocksCount
+                                        val avgLowFreq = snoreSumLowFreqRatio / snoreBlocksCount
+
+                                        var savedAudioPath: String? = null
+                                        
+                                        if (isSaveClipsEnabled && snoreAudioBuffer.isNotEmpty()) {
+                                            try {
+                                                val dir = File(applicationContext.filesDir, "snore_clips")
+                                                if (!dir.exists()) dir.mkdirs()
+                                                
+                                                val clipFile = File(dir, "snore_${snoreStartTime}.wav")
+                                                WavWriter.saveWavFile(clipFile, sampleRate, snoreAudioBuffer)
+                                                savedAudioPath = clipFile.absolutePath
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "WAV write failed", e)
+                                            }
+                                        }
+
+                                        val event = SnoreEvent(
+                                            timestamp = snoreStartTime,
+                                            durationSeconds = durationSec,
+                                            maxDb = avgDb,
+                                            maxRms = snoreMaxRms,
+                                            meanZcr = avgZcr,
+                                            meanBandEnergy = avgBand,
+                                            meanLowFreqRatio = avgLowFreq,
+                                            audioFilePath = savedAudioPath
+                                        )
+                                        
+                                        launch {
+                                            val rowId = repository.insertEvent(event)
+                                            Log.d(TAG, "SnoreEvent saved. DB Row ID: $rowId")
+                                            _sessionEventCount.value = _sessionEventCount.value + 1
                                         }
                                     }
 
-                                    // Save to database
-                                    val event = SnoreEvent(
-                                        timestamp = snoreStartTime,
-                                        durationSeconds = durationSec,
-                                        maxDb = avgDb, // use average dB of high states
-                                        maxRms = snoreMaxRms,
-                                        meanZcr = avgZcr,
-                                        meanBandEnergy = avgBand,
-                                        meanLowFreqRatio = avgLowFreq,
-                                        audioFilePath = savedAudioPath
-                                    )
-                                    
-                                    launch {
-                                        val rowId = repository.insertEvent(event)
-                                        Log.d(TAG, "SnoreEvent saved. DB Row ID: $rowId")
-                                        _sessionEventCount.value = _sessionEventCount.value + 1
+                                    isSnoringActive = false
+                                    snoreAudioBuffer.clear()
+                                    _isCurrentlySnoring.value = false
+                                    updateNotification("Monitoring bedroom acoustics dynamically...")
+                                } else {
+                                    if (snoreAudioBuffer.size < 187) {
+                                        snoreAudioBuffer.add(frameSamples)
                                     }
-                                }
-
-                                // Reset states
-                                isSnoringActive = false
-                                snoreAudioBuffer.clear()
-                                _isCurrentlySnoring.value = false
-                                updateNotification("Monitoring bedroom acoustics dynamically...")
-                            } else {
-                                // Quiet frame, but within debounce window. Accumulate quiet samples to record natural pauses.
-                                if (snoreAudioBuffer.size < 187) {
-                                    snoreAudioBuffer.add(frameSamples)
                                 }
                             }
                         }
                     }
-                } else if (readResult == AudioRecord.ERROR_INVALID_OPERATION || readResult == AudioRecord.ERROR_BAD_VALUE) {
-                    Log.e(TAG, "AudioRecord reading error flag: $readResult")
                 }
-            }
-            
-            // Clean up if service is stopped while snoring is active
-            if (isSnoringActive && snoreBlocksCount > 0) {
-                val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
-                if (durationSec >= 1.0) {
-                    val avgDb = snoreSumDb / snoreBlocksCount
-                    val avgZcr = snoreSumZcr / snoreBlocksCount
-                    val avgBand = snoreSumBandEnergy / snoreBlocksCount
-                    val avgLowFreq = snoreSumLowFreqRatio / snoreBlocksCount
+            } finally {
+                if (isSnoringActive && snoreBlocksCount > 0) {
+                    val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
+                    if (durationSec >= 1.0) {
+                        val avgDb = snoreSumDb / snoreBlocksCount
+                        val avgZcr = snoreSumZcr / snoreBlocksCount
+                        val avgBand = snoreSumBandEnergy / snoreBlocksCount
+                        val avgLowFreq = snoreSumLowFreqRatio / snoreBlocksCount
 
-                    var savedAudioPath: String? = null
-                    if (isSaveClipsEnabled && snoreAudioBuffer.isNotEmpty()) {
-                        try {
-                            val dir = File(applicationContext.filesDir, "snore_clips")
-                            if (!dir.exists()) dir.mkdirs()
-                            val clipFile = File(dir, "snore_${snoreStartTime}.wav")
-                            WavWriter.saveWavFile(clipFile, sampleRate, snoreAudioBuffer)
-                            savedAudioPath = clipFile.absolutePath
-                        } catch (e: Exception) {
-                            Log.e(TAG, "WAV write failed", e)
+                        var savedAudioPath: String? = null
+                        if (isSaveClipsEnabled && snoreAudioBuffer.isNotEmpty()) {
+                            try {
+                                val dir = File(applicationContext.filesDir, "snore_clips")
+                                if (!dir.exists()) dir.mkdirs()
+                                val clipFile = File(dir, "snore_${snoreStartTime}.wav")
+                                WavWriter.saveWavFile(clipFile, sampleRate, snoreAudioBuffer)
+                                savedAudioPath = clipFile.absolutePath
+                            } catch (e: Exception) {
+                                Log.e(TAG, "WAV write failed", e)
+                            }
                         }
-                    }
 
-                    val event = SnoreEvent(
-                        timestamp = snoreStartTime,
-                        durationSeconds = durationSec,
-                        maxDb = avgDb,
-                        maxRms = snoreMaxRms,
-                        meanZcr = avgZcr,
-                        meanBandEnergy = avgBand,
-                        meanLowFreqRatio = avgLowFreq,
-                        audioFilePath = savedAudioPath
-                    )
-                    repository.insertEvent(event)
-                    _sessionEventCount.value = _sessionEventCount.value + 1
+                        val event = SnoreEvent(
+                            timestamp = snoreStartTime,
+                            durationSeconds = durationSec,
+                            maxDb = avgDb,
+                            maxRms = snoreMaxRms,
+                            meanZcr = avgZcr,
+                            meanBandEnergy = avgBand,
+                            meanLowFreqRatio = avgLowFreq,
+                            audioFilePath = savedAudioPath
+                        )
+                        repository.insertEvent(event)
+                        _sessionEventCount.value = _sessionEventCount.value + 1
+                    }
                 }
+
+                try {
+                    if (record.state == AudioRecord.STATE_INITIALIZED) {
+                        record.stop()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping AudioRecord in finally", e)
+                }
+                try {
+                    record.release()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error releasing AudioRecord in finally", e)
+                }
+                if (audioRecord == record) {
+                    audioRecord = null
+                }
+                Log.d(TAG, "Record thread loop finished & hardware released safely")
             }
-            
-            Log.d(TAG, "Record thread loop finished")
         }
     }
 
     private fun stopAudioCapture() {
-        isRecording.set(false)
+        if (!isRecording.getAndSet(false)) return
+        try {
+            audioRecord?.stop()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping AudioRecord", e)
+        }
         recordingJob?.cancel()
         recordingJob = null
-        try {
-            audioRecord?.apply {
-                if (state == AudioRecord.STATE_INITIALIZED) {
-                    stop()
-                }
-                release()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error releasing AudioRecord", e)
-        }
-        audioRecord = null
     }
 
     private fun updateNotification(contentText: String) {
@@ -481,6 +500,14 @@ class SnoreDetectionService : Service() {
     override fun onDestroy() {
         Log.d(TAG, "Service being destroyed")
         stopAudioCapture()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+
         serviceJob.cancel()
         
         // Release WakeLock safely
