@@ -1,0 +1,23 @@
+Categories:
+  - Science
+  - Health
+
+License: Apache-2.0
+
+AuthorName: elgrande73
+
+SourceCode: https://github.com/elgrande73/FOSS-snore-detector-android-app
+IssueTracker: https://github.com/elgrande73/FOSS-snore-detector-android-app/issues
+
+AutoName: Snore Detector
+
+RepoType: git
+Repo: https://github.com/elgrande73/FOSS-snore-detector-android-app.git
+
+Builds:
+  - versionName: 1.0
+    versionCode: 1
+    commit: v1.0
+    subdir: app
+    gradle:
+      - assembleRelease
