@@ -53,11 +53,16 @@ Snore Detector adheres strictly to F-Droid Free and Open Source Software guideli
 Clone the repository and build using Gradle:
 
 ```bash
-git clone https://github.com/elgrande73/FOSS-snore-detector-android-app.git
+git clone https://github.com/elgrande73/FOSS-snore-detector-android-app
+cd FOSS-snore-detector-android-app
+./gradlew assembleRelease
 ```
 
 ---
 
 ## 📄 Contact
 
-- For questions, contact: elgrande.github@gmail.com
+```text
+Copyright 2026 elgrande73
+For questions, contact: elgrande.github@gmail.com
+```
