@@ -1,20 +1,14 @@
 name: F-Droid Build Test
 
-on: [push]
+'on':
+push:
 
 jobs:
 test:
 runs-on: ubuntu-24.04
-
 steps:
-  - name: Checkout
-    uses: actions/checkout@v4
-
-  - name: Show environment
-    run: |
-      echo "GitHub Actions is working"
-      java -version
-      git --version
+- name: Checkout
+uses: actions/checkout@v4
 
   - name: Check Gradle
     run: |
