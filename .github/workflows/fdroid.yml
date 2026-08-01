@@ -1,17 +1,1 @@
-name: F-Droid Build Test
-
-"on":
-push: {}
-
-jobs:
-test:
-runs-on: ubuntu-24.04
-
-steps:
-  - name: Checkout
-    uses: actions/checkout@v4
-
-  - name: Check Gradle
-    run: |
-      chmod +x ./gradlew
-      ./gradlew --version
+{"name":"F-Droid Build Test","on":{"push":{}},"jobs":{"test":{"runs-on":"ubuntu-24.04","steps":[{"name":"Checkout","uses":"actions/checkout@v4"},{"name":"Check Gradle","run":"chmod +x ./gradlew && ./gradlew --version"}]}}}
