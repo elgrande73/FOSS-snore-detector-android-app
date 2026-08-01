@@ -21,7 +21,6 @@ fdroid:
 name: F-Droid metadata and build test
 runs-on: ubuntu-24.04
 
-```
 steps:
   - name: Checkout application
     uses: actions/checkout@v4
@@ -117,4 +116,6 @@ steps:
         ${{ runner.temp }}/fdroiddata/unsigned/
         ${{ runner.temp }}/fdroiddata/log/
       if-no-files-found: ignore
-```
+        ${{ runner.temp }}/fdroiddata/unsigned/
+        ${{ runner.temp }}/fdroiddata/log/
+      if-no-files-found: ignore
