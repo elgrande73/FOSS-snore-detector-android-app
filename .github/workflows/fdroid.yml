@@ -1,0 +1,120 @@
+name: F-Droid Build Test
+
+on:
+push:
+branches:
+- main
+- master
+tags:
+- 'v*'
+pull_request:
+branches:
+- main
+- master
+workflow_dispatch:
+
+permissions:
+contents: read
+
+jobs:
+fdroid:
+name: F-Droid metadata and build test
+runs-on: ubuntu-24.04
+
+```
+steps:
+  - name: Checkout application
+    uses: actions/checkout@v4
+    with:
+      fetch-depth: 0
+
+  - name: Set up Java 17
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
+
+  - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: '3.12'
+
+  - name: Check Gradle build
+    run: |
+      chmod +x ./gradlew
+      ./gradlew clean assembleRelease --no-daemon
+
+  - name: Clone F-Droid Server
+    run: |
+      git clone --depth 1 https://gitlab.com/fdroid/fdroidserver.git \
+        "$RUNNER_TEMP/fdroidserver"
+
+  - name: Install F-Droid Server
+    run: |
+      python -m venv "$RUNNER_TEMP/fdroid-venv"
+      source "$RUNNER_TEMP/fdroid-venv/bin/activate"
+      python -m pip install --upgrade pip
+      python -m pip install -e "$RUNNER_TEMP/fdroidserver"
+
+  - name: Add F-Droid to PATH
+    run: |
+      echo "$RUNNER_TEMP/fdroid-venv/bin" >> "$GITHUB_PATH"
+
+  - name: Verify F-Droid Server
+    run: |
+      fdroid --version
+
+  - name: Create temporary F-Droid data directory
+    run: |
+      mkdir -p "$RUNNER_TEMP/fdroiddata/metadata"
+      mkdir -p "$RUNNER_TEMP/fdroiddata/srclibs"
+      mkdir -p "$RUNNER_TEMP/fdroiddata/tmp"
+
+  - name: Create F-Droid metadata
+    working-directory: ${{ runner.temp }}/fdroiddata
+    run: |
+      cat > metadata/com.aistudio.snoredetector.afkwd.yml <<'EOF'
+      Categories:
+        - Health
+
+      License: Apache-2.0
+
+      AutoName: Snore Detector
+
+      RepoType: git
+      Repo: https://github.com/elgrande73/FOSS-snore-detector-android-app.git
+
+      Builds:
+        - versionName: '1.0.0'
+          versionCode: 1
+          commit: v1.0.0
+          subdir: app
+          gradle:
+            - yes
+      EOF
+
+  - name: Read F-Droid metadata
+    working-directory: ${{ runner.temp }}/fdroiddata
+    run: |
+      fdroid readmeta
+
+  - name: Lint F-Droid metadata
+    working-directory: ${{ runner.temp }}/fdroiddata
+    run: |
+      fdroid lint com.aistudio.snoredetector.afkwd
+
+  - name: Build with F-Droid
+    working-directory: ${{ runner.temp }}/fdroiddata
+    run: |
+      fdroid build com.aistudio.snoredetector.afkwd
+
+  - name: Upload F-Droid build artifacts
+    if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: fdroid-build-output
+      path: |
+        ${{ runner.temp }}/fdroiddata/unsigned/
+        ${{ runner.temp }}/fdroiddata/log/
+      if-no-files-found: ignore
+```
