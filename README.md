@@ -1,4 +1,4 @@
-# Snore Detector (SnoreLog FOSS)
+# Snore Detector
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![F-Droid](https://img.shields.io/badge/F--Droid-FOSS-green.svg)](https://f-droid.org/)

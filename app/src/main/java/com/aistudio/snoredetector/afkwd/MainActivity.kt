@@ -339,7 +339,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "SnoreLog",
+                            text = "Snore Detector",
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Normal,
                             color = MaterialTheme.colorScheme.onBackground,
