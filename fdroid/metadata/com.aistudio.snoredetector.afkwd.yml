@@ -16,7 +16,7 @@ Repo: https://github.com/elgrande73/FOSS-snore-detector-android-app.git
 Builds:
   - versionName: 1.0.0
     versionCode: 1
-    commit: v1.0.0
+    commit: 74427f4cdac7262a217dce32adc40d02f53aceec
     subdir: app
     gradle:
       - yes
