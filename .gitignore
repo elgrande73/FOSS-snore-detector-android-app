@@ -19,3 +19,4 @@ debug.keystore
 debug.keystore.base64
 *.keystore
 *.jks
+keystore.properties

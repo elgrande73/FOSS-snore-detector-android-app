@@ -10,6 +10,11 @@ AutoName: Snore Detector
 RepoType: git
 Repo: https://github.com/elgrande73/FOSS-snore-detector-android-app.git
 
+Binaries: https://github.com/elgrande73/FOSS-snore-detector-android-app/releases/download/v%v/app-release.apk
+
+AllowedAPKSigningKeys:
+  - 134e479ce6977d81363dd3696fb1ae4dd714c35792045154b235a3a9ebc77da7
+
 Builds:
   - versionName: 1.0.0
     versionCode: 1
