@@ -30,6 +30,11 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
   
+  dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+  }
+  
    signingConfigs {
         create("release") {
             storeFile = file(keystoreProperties["storeFile"] as String)
@@ -37,7 +42,7 @@ android {
             keyAlias = keystoreProperties["keyAlias"] as String
             keyPassword = keystoreProperties["keyPassword"] as String
         }
-    }
+  }
 
 
   buildTypes {
