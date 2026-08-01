@@ -1,0 +1,1 @@
+Detects snoring during sleep and records snore events.

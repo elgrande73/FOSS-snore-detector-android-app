@@ -1,0 +1,40 @@
+Snore Detector is a privacy-first, 100% open source Android app for real-time snore detection and sleep analysis. All audio processing happens entirely on your device—no cloud services, tracking, telemetry, or network connection required.
+
+Features
+
+• Real-time snore detection using multiple digital signal processing (DSP) algorithms, including decibel level, RMS power, Zero-Crossing Rate (ZCR), snore-band spectral energy (100 Hz–1 kHz), and low-frequency spectral analysis.
+
+• Privacy by design. Audio never leaves your device. No accounts, analytics, advertising, or external servers.
+
+• Adjustable detection settings. Customize sensitivity and enable or disable individual detection algorithms.
+
+• Snore event history. Detected events are stored locally with timestamps, duration, peak volume, and confidence information.
+
+• Optional audio recording. Save short WAV recordings of detected snoring events for later playback.
+
+• CSV export. Export your detection history for personal analysis or to share with healthcare professionals.
+
+• Modern interface. Built with Jetpack Compose and Material 3, supporting light and dark themes.
+
+Privacy & F-Droid
+
+Snore Detector is fully offline and designed to comply with F-Droid's Free Software principles.
+
+No analytics or telemetry
+No advertisements
+No proprietary SDKs
+No tracking
+No cloud services
+Works entirely offline
+
+The app only requires the permissions needed for audio monitoring and background operation.
+
+Technology
+Kotlin
+Jetpack Compose (Material 3)
+Room database
+Kotlin Coroutines & StateFlow
+Android AudioRecord with on-device FFT-based signal processing
+Foreground Service for continuous overnight monitoring
+
+Snore Detector is free software released under an open-source license, giving you full control over your sleep data while providing reliable overnight snore monitoring.
