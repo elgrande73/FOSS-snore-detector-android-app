@@ -60,6 +60,11 @@ cd FOSS-snore-detector-android-app
 
 ---
 
+## 📦 All Releases
+- **[View All Releases](https://github.com/elgrande73/FOSS-snore-detector-android-app/releases)** on GitHub
+
+---
+
 ## 📄 Contact
 
 ```text
