@@ -1,4 +1,4 @@
-package com.example.dsp
+package com.aistudio.snoredetector.afkwd.dsp
 
 import kotlin.math.cos
 import kotlin.math.sin

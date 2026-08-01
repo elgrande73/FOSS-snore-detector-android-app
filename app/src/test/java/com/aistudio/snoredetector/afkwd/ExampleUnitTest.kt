@@ -1,4 +1,4 @@
-package com.example
+package com.aistudio.snoredetector.afkwd
 
 import org.junit.Assert.*
 import org.junit.Test

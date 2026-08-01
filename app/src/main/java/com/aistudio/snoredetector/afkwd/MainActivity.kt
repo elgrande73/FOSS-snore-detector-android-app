@@ -1,4 +1,4 @@
-package com.example
+package com.aistudio.snoredetector.afkwd
 
 import android.Manifest
 import android.content.Context
@@ -86,11 +86,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.data.SnoreEvent
-import com.example.dsp.AmplitudePoint
-import com.example.service.SnoreDetectionService
-import com.example.ui.theme.MyApplicationTheme
-import com.example.viewmodel.SnoreViewModel
+import com.aistudio.snoredetector.afkwd.data.SnoreEvent
+import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
+import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
+import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date

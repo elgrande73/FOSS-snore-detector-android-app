@@ -1,4 +1,4 @@
-package com.example.service
+package com.aistudio.snoredetector.afkwd.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -15,15 +15,15 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.example.MainActivity
-import com.example.data.AppDatabase
-import com.example.data.SnoreEvent
-import com.example.data.SnoreRepository
-import com.example.dsp.AmplitudePoint
-import com.example.dsp.AnalysisResult
-import com.example.dsp.DetectionConfig
-import com.example.dsp.SnoreAnalyzer
-import com.example.dsp.WavWriter
+import com.aistudio.snoredetector.afkwd.MainActivity
+import com.aistudio.snoredetector.afkwd.data.AppDatabase
+import com.aistudio.snoredetector.afkwd.data.SnoreEvent
+import com.aistudio.snoredetector.afkwd.data.SnoreRepository
+import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.dsp.AnalysisResult
+import com.aistudio.snoredetector.afkwd.dsp.DetectionConfig
+import com.aistudio.snoredetector.afkwd.dsp.SnoreAnalyzer
+import com.aistudio.snoredetector.afkwd.dsp.WavWriter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -91,7 +91,7 @@ class SnoreDetectionService : Service() {
         /**
          * Helper command to easily stop the service externally.
          */
-        const val ACTION_STOP_SERVICE = "com.example.service.ACTION_STOP_SERVICE"
+        const val ACTION_STOP_SERVICE = "com.aistudio.snoredetector.afkwd.service.ACTION_STOP_SERVICE"
     }
 
     override fun onCreate() {

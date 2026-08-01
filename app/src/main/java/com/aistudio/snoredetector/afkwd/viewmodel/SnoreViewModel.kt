@@ -1,4 +1,4 @@
-package com.example.viewmodel
+package com.aistudio.snoredetector.afkwd.viewmodel
 
 import android.app.Application
 import android.content.Context
@@ -8,11 +8,11 @@ import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.AppDatabase
-import com.example.data.SnoreEvent
-import com.example.data.SnoreRepository
-import com.example.dsp.AmplitudePoint
-import com.example.service.SnoreDetectionService
+import com.aistudio.snoredetector.afkwd.data.AppDatabase
+import com.aistudio.snoredetector.afkwd.data.SnoreEvent
+import com.aistudio.snoredetector.afkwd.data.SnoreRepository
+import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted

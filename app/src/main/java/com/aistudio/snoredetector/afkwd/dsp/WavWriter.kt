@@ -1,4 +1,4 @@
-package com.example.dsp
+package com.aistudio.snoredetector.afkwd.dsp
 
 import java.io.File
 import java.io.FileOutputStream

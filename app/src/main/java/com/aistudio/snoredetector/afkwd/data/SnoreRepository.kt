@@ -1,4 +1,4 @@
-package com.example.data
+package com.aistudio.snoredetector.afkwd.data
 
 import kotlinx.coroutines.flow.Flow
 

@@ -1,4 +1,4 @@
-package com.example.dsp
+package com.aistudio.snoredetector.afkwd.dsp
 
 /**
  * Data model for plotting the measurement timeline in Jetpack Compose Canvas.
