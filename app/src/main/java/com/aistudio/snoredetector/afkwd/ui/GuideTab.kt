@@ -76,7 +76,7 @@ fun GuideTab() {
             .testTag("guide_tab"),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item {
+        item(key = "guide_hero_header") {
             Spacer(modifier = Modifier.height(8.dp))
             // Hero Title Card
             Card(
@@ -155,12 +155,12 @@ fun GuideTab() {
         }
 
         // Quick Category Filter Row
-        item {
+        item(key = "guide_category_chips") {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(categories.size) { index ->
+                items(categories.size, key = { categories[it] }) { index ->
                     FilterChip(
                         selected = selectedFilterIndex == index,
                         onClick = {
@@ -181,7 +181,7 @@ fun GuideTab() {
 
         // SECTION 1: Getting Started
         if (selectedFilterIndex == 0 || selectedFilterIndex == 1) {
-            item {
+            item(key = "guide_section_1") {
                 GuideSectionCard(
                     sectionNumber = "1",
                     title = "Getting started",
@@ -207,7 +207,7 @@ fun GuideTab() {
             }
 
             // SECTION 2: Record a night
-            item {
+            item(key = "guide_section_2") {
                 GuideSectionCard(
                     sectionNumber = "2",
                     title = "Record a night",
@@ -233,7 +233,7 @@ fun GuideTab() {
             }
 
             // SECTION 3: Understanding the results
-            item {
+            item(key = "guide_section_3") {
                 GuideSectionCard(
                     sectionNumber = "3",
                     title = "Understanding the results",
@@ -277,7 +277,7 @@ fun GuideTab() {
 
         // SECTION 4: No snoring detected?
         if (selectedFilterIndex == 0 || selectedFilterIndex == 2) {
-            item {
+            item(key = "guide_section_4") {
                 GuideSectionCard(
                     sectionNumber = "4",
                     title = "No snoring detected?",
@@ -320,7 +320,7 @@ fun GuideTab() {
 
         // SECTION 5: What can help with snoring?
         if (selectedFilterIndex == 0 || selectedFilterIndex == 3) {
-            item {
+            item(key = "guide_section_5") {
                 GuideSectionCard(
                     sectionNumber = "5",
                     title = "What can help with snoring?",
@@ -359,7 +359,7 @@ fun GuideTab() {
             }
 
             // SECTION 6: Commonly suggested lifestyle ideas — evidence is limited or unclear
-            item {
+            item(key = "guide_section_6") {
                 GuideSectionCard(
                     sectionNumber = "6",
                     title = "Commonly suggested lifestyle ideas — evidence is limited or unclear",
@@ -418,7 +418,7 @@ fun GuideTab() {
 
         // SECTION 7: When should I talk to a doctor?
         if (selectedFilterIndex == 0 || selectedFilterIndex == 4) {
-            item {
+            item(key = "guide_section_7") {
                 GuideSectionCard(
                     sectionNumber = "7",
                     title = "When should I talk to a doctor?",
@@ -454,7 +454,7 @@ fun GuideTab() {
             }
 
             // SECTION 8: What Snore Detector can and cannot tell you
-            item {
+            item(key = "guide_section_8") {
                 GuideSectionCard(
                     sectionNumber = "8",
                     title = "What Snore Detector can and cannot tell you",
@@ -541,7 +541,7 @@ fun GuideTab() {
 
         // SECTION 9: Privacy & FOSS
         if (selectedFilterIndex == 0 || selectedFilterIndex == 5) {
-            item {
+            item(key = "guide_section_9") {
                 GuideSectionCard(
                     sectionNumber = "9",
                     title = "Privacy & FOSS",
@@ -587,7 +587,7 @@ fun GuideTab() {
         }
 
         // Bottom Disclaimer Box
-        item {
+        item(key = "guide_disclaimer") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
@@ -781,4 +781,3 @@ fun MetricExplanationItem(title: String, description: String) {
         )
     }
 }
-

@@ -306,7 +306,6 @@ fun PermissionExplanationScreen(onTriggerRequest: () -> Unit) {
 fun DashboardTab(viewModel: SnoreViewModel) {
     val isRunning by SnoreDetectionService.isServiceRunning.collectAsState()
     val isCurrentlySnoring by SnoreDetectionService.isCurrentlySnoring.collectAsState()
-    val rawAnalysisResult by SnoreDetectionService.liveAnalysis.collectAsState()
     val timelineData by viewModel.timelineDisplayState.collectAsState()
     val errorMsg by SnoreDetectionService.serviceError.collectAsState()
     
@@ -323,37 +322,6 @@ fun DashboardTab(viewModel: SnoreViewModel) {
     val useLowFreqRatio by viewModel.useLowFreqRatio.collectAsState()
     
     val context = LocalContext.current
-    val currentDb = rawAnalysisResult?.db ?: 30.0f
-
-    var sessionDurationStr by remember { mutableStateOf("00h 00m 00s") }
-    LaunchedEffect(isRunning, sessionStartTime) {
-        if (isRunning && sessionStartTime > 0L) {
-            while (true) {
-                val elapsedMs = System.currentTimeMillis() - sessionStartTime
-                val elapsedSec = elapsedMs / 1000
-                val totalMin = elapsedSec / 60
-                val h = totalMin / 60
-                val m = totalMin % 60
-                val s = elapsedSec % 60
-                sessionDurationStr = String.format("%02dh %02dm %02ds", h, m, s)
-                kotlinx.coroutines.delay(1000)
-            }
-        } else {
-            sessionDurationStr = "00h 00m 00s"
-        }
-    }
-
-    // Flashing Animation for Snoring indicator
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val alphaAnim by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
 
     LaunchedEffect(errorMsg) {
         errorMsg?.let {
@@ -368,7 +336,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // App Title Header
-        item {
+        item(key = "dashboard_header") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -443,222 +411,46 @@ fun DashboardTab(viewModel: SnoreViewModel) {
             }
         }
 
-        // Circular dynamic meter
-        item {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    modifier = Modifier.size(240.dp),
-                    shape = CircleShape,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        // Progress Arc
-                        val arcTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                        val arcPrimaryColor = MaterialTheme.colorScheme.primary
-                        val arcErrorColor = MaterialTheme.colorScheme.error
-                        Canvas(modifier = Modifier.size(190.dp)) {
-                            // Track Arc background
-                            drawArc(
-                                color = arcTrackColor,
-                                startAngle = 135f,
-                                sweepAngle = 270f,
-                                useCenter = false,
-                                style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                            // Dynamic active sweep mapping from 30dB (silent) to 110dB (loud)
-                            val normalizedRatio = ((currentDb - 30f).coerceAtLeast(0f) / 80f)
-                            val sweepAngle = (normalizedRatio * 270f).coerceIn(0f, 270f)
-                            
-                            drawArc(
-                                color = if (isCurrentlySnoring) arcErrorColor else arcPrimaryColor,
-                                startAngle = 135f,
-                                sweepAngle = sweepAngle,
-                                useCenter = false,
-                                style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round)
-                            )
-                        }
-
-                        // Center decibel label text
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "${currentDb.toInt()}",
-                                fontSize = 48.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isCurrentlySnoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "DECIBELS (dB)",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                    }
-                }
-            }
+        // Circular dynamic meter (isolated so 50ms audio ticks only recompose the meter canvas)
+        item(key = "dashboard_meter") {
+            DecibelMeterSection(isRunning = isRunning, isCurrentlySnoring = isCurrentlySnoring)
         }
 
-        // Running session stats cards
+        // Running session stats cards (isolated so 1s timer ticks only recompose this card)
         if (isRunning) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Active duration
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "ACTIVE SESSION",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = sessionDurationStr,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    // Snores logged
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "SNORES LOGGED",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = if (sessionEventCount == 1) "1 incident" else "$sessionEventCount incidents",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
+            item(key = "dashboard_session_stats") {
+                ActiveSessionStatsSection(
+                    sessionStartTime = sessionStartTime,
+                    sessionEventCount = sessionEventCount
+                )
             }
         }
 
-        // Real-time parameters inspection list (visible when running)
-        if (isRunning && rawAnalysisResult != null) {
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    shape = RoundedCornerShape(28.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "Live DSP Spectrum Diagnostics:",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 0.5.sp
-                        )
-                        
-                        // RMS / dB Row
-                        MetricRow(
-                            label = "Decibels Level (RMS)",
-                            value = "${String.format("%.1f", rawAnalysisResult!!.db)} dB",
-                            thresholdStr = ">= ${String.format("%.1f", rmsDbThreshold)} dB",
-                            isMet = rawAnalysisResult!!.rmsThresholdMet,
-                            isActive = useRms
-                        )
-
-                        // ZCR Row
-                        MetricRow(
-                            label = "Zero-Crossing Rate",
-                            value = String.format("%.3f", rawAnalysisResult!!.zcr),
-                            thresholdStr = "<= ${String.format("%.2f", zcrThreshold)}",
-                            isMet = rawAnalysisResult!!.zcrThresholdMet,
-                            isActive = useZcr
-                        )
-
-                        // Band-Energy
-                        MetricRow(
-                            label = "Snore Band Energy (100-1k Hz)",
-                            value = String.format("%.4f", rawAnalysisResult!!.bandEnergy),
-                            thresholdStr = ">= ${String.format("%.3f", bandEnergyThreshold)}",
-                            isMet = rawAnalysisResult!!.bandThresholdMet,
-                            isActive = useBandEnergy
-                        )
-
-                        // Low-Frequency ratio
-                        MetricRow(
-                            label = "Low Frequency Ratio (<500 Hz)",
-                            value = "${(rawAnalysisResult!!.lowFreqEnergyRatio * 100).toInt()}%",
-                            thresholdStr = ">= ${(lowFreqRatioThreshold * 100).toInt()}%",
-                            isMet = rawAnalysisResult!!.lowFreqThresholdMet,
-                            isActive = useLowFreqRatio
-                        )
-                    }
-                }
+        // Real-time parameters inspection list (visible when running, isolated live spectrum observer)
+        if (isRunning) {
+            item(key = "dashboard_diagnostics") {
+                LiveSpectrumDiagnosticsSection(
+                    rmsDbThreshold = rmsDbThreshold,
+                    zcrThreshold = zcrThreshold,
+                    bandEnergyThreshold = bandEnergyThreshold,
+                    lowFreqRatioThreshold = lowFreqRatioThreshold,
+                    useRms = useRms,
+                    useZcr = useZcr,
+                    useBandEnergy = useBandEnergy,
+                    useLowFreqRatio = useLowFreqRatio
+                )
             }
         }
 
-        // Flashing Alert banner when snoring detected
+        // Flashing Alert banner when snoring detected (isolated animation loop)
         if (isCurrentlySnoring) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.error)
-                        .padding(12.dp)
-                        .alpha(alphaAnim),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "⚠️ ACTIVE SNORE PATTERN DETECTED & SAVING...",
-                        color = MaterialTheme.colorScheme.onError,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        letterSpacing = 0.5.sp
-                    )
-                }
+            item(key = "dashboard_snore_alert") {
+                ActiveSnoreAlertBanner()
             }
         }
 
         // Master Control Start/Stop button
-        item {
+        item(key = "dashboard_control_button") {
             if (isRunning) {
                 Button(
                     onClick = { viewModel.stopServiceDetection() },
@@ -687,7 +479,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
         }
 
         // Amplitude Graph of sessions
-        item {
+        item(key = "dashboard_amplitude_graph") {
             Column {
                 Text(
                     text = if (isRunning) "Active Session Timeline Profile" else "Last Completed Session Profile",
@@ -705,6 +497,261 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                 )
             }
         }
+    }
+}
+
+@Composable
+fun DecibelMeterSection(isRunning: Boolean, isCurrentlySnoring: Boolean) {
+    val rawAnalysisResult by SnoreDetectionService.liveAnalysis.collectAsState()
+    val currentDb = rawAnalysisResult?.db ?: 30.0f
+
+    val arcTrackColor = MaterialTheme.colorScheme.surfaceVariant
+    val arcPrimaryColor = MaterialTheme.colorScheme.primary
+    val arcErrorColor = MaterialTheme.colorScheme.error
+
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier.size(240.dp),
+            shape = CircleShape,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Canvas(modifier = Modifier.size(190.dp)) {
+                    // Track Arc background
+                    drawArc(
+                        color = arcTrackColor,
+                        startAngle = 135f,
+                        sweepAngle = 270f,
+                        useCenter = false,
+                        style = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    // Dynamic active sweep mapping from 30dB (silent) to 110dB (loud)
+                    val normalizedRatio = ((currentDb - 30f).coerceAtLeast(0f) / 80f)
+                    val sweepAngle = (normalizedRatio * 270f).coerceIn(0f, 270f)
+                    
+                    drawArc(
+                        color = if (isCurrentlySnoring) arcErrorColor else arcPrimaryColor,
+                        startAngle = 135f,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                }
+
+                // Center decibel label text
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "${currentDb.toInt()}",
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isCurrentlySnoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "DECIBELS (dB)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ActiveSessionStatsSection(
+    sessionStartTime: Long,
+    sessionEventCount: Int
+) {
+    var sessionDurationStr by remember { mutableStateOf("00h 00m 00s") }
+    LaunchedEffect(sessionStartTime) {
+        if (sessionStartTime > 0L) {
+            while (true) {
+                val elapsedMs = System.currentTimeMillis() - sessionStartTime
+                val elapsedSec = elapsedMs / 1000
+                val totalMin = elapsedSec / 60
+                val h = totalMin / 60
+                val m = totalMin % 60
+                val s = elapsedSec % 60
+                sessionDurationStr = String.format(Locale.US, "%02dh %02dm %02ds", h, m, s)
+                kotlinx.coroutines.delay(1000)
+            }
+        } else {
+            sessionDurationStr = "00h 00m 00s"
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Active duration
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "ACTIVE SESSION",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = sessionDurationStr,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // Snores logged
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "SNORES LOGGED",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = if (sessionEventCount == 1) "1 incident" else "$sessionEventCount incidents",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveSpectrumDiagnosticsSection(
+    rmsDbThreshold: Float,
+    zcrThreshold: Float,
+    bandEnergyThreshold: Float,
+    lowFreqRatioThreshold: Float,
+    useRms: Boolean,
+    useZcr: Boolean,
+    useBandEnergy: Boolean,
+    useLowFreqRatio: Boolean
+) {
+    val rawAnalysisResult by SnoreDetectionService.liveAnalysis.collectAsState()
+    val analysis = rawAnalysisResult ?: return
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        shape = RoundedCornerShape(28.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Live DSP Spectrum Diagnostics:",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                letterSpacing = 0.5.sp
+            )
+            
+            // RMS / dB Row
+            MetricRow(
+                label = "Decibels Level (RMS)",
+                value = "${String.format(Locale.US, "%.1f", analysis.db)} dB",
+                thresholdStr = ">= ${String.format(Locale.US, "%.1f", rmsDbThreshold)} dB",
+                isMet = analysis.rmsThresholdMet,
+                isActive = useRms
+            )
+
+            // ZCR Row
+            MetricRow(
+                label = "Zero-Crossing Rate",
+                value = String.format(Locale.US, "%.3f", analysis.zcr),
+                thresholdStr = "<= ${String.format(Locale.US, "%.2f", zcrThreshold)}",
+                isMet = analysis.zcrThresholdMet,
+                isActive = useZcr
+            )
+
+            // Band-Energy
+            MetricRow(
+                label = "Snore Band Energy (100-1k Hz)",
+                value = String.format(Locale.US, "%.4f", analysis.bandEnergy),
+                thresholdStr = ">= ${String.format(Locale.US, "%.3f", bandEnergyThreshold)}",
+                isMet = analysis.bandThresholdMet,
+                isActive = useBandEnergy
+            )
+
+            // Low-Frequency ratio
+            MetricRow(
+                label = "Low Frequency Ratio (<500 Hz)",
+                value = "${(analysis.lowFreqEnergyRatio * 100).toInt()}%",
+                thresholdStr = ">= ${(lowFreqRatioThreshold * 100).toInt()}%",
+                isMet = analysis.lowFreqThresholdMet,
+                isActive = useLowFreqRatio
+            )
+        }
+    }
+}
+
+@Composable
+fun ActiveSnoreAlertBanner() {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alphaAnim by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.error)
+            .padding(12.dp)
+            .alpha(alphaAnim),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "⚠️ ACTIVE SNORE PATTERN DETECTED & SAVING...",
+            color = MaterialTheme.colorScheme.onError,
+            fontWeight = FontWeight.Bold,
+            fontSize = 13.sp,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
@@ -1107,7 +1154,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
                         },
                         onExportAudioClick = {
                             val path = item.audioFilePath
-                            if (path != null && File(path).exists()) {
+                            if (!path.isNullOrEmpty()) {
                                 pendingSingleExportEvent = item
                                 val defaultName = AudioExportManager.formatAudioFileName(item.timestamp, item.id)
                                 singleAudioExportLauncher.launch(defaultName)
@@ -1421,7 +1468,14 @@ fun SnoreEventCard(
     onDeleteClick: () -> Unit,
     dateFormatter: SimpleDateFormat
 ) {
-    val hasAudio = event.audioFilePath != null && File(event.audioFilePath).exists()
+    val hasAudio = !event.audioFilePath.isNullOrEmpty()
+    val formattedDate = remember(event.timestamp) { dateFormatter.format(Date(event.timestamp)) }
+    val durationText = remember(event.durationSeconds) { "Duration: ${String.format(Locale.US, "%.1f", event.durationSeconds)}s" }
+    val peakDbText = remember(event.maxDb) { "Peak: ${event.maxDb.toInt()} dB" }
+    val maxRmsText = remember(event.maxRms) { String.format(Locale.US, "%.4f", event.maxRms) }
+    val meanZcrText = remember(event.meanZcr) { String.format(Locale.US, "%.3f", event.meanZcr) }
+    val bandEnergyText = remember(event.meanBandEnergy) { String.format(Locale.US, "%.4f", event.meanBandEnergy) }
+    val lowFreqRatioText = remember(event.meanLowFreqRatio) { "${(event.meanLowFreqRatio * 100).toInt()}%" }
 
     Card(
         modifier = Modifier
@@ -1460,7 +1514,7 @@ fun SnoreEventCard(
 
                     Column {
                         Text(
-                            text = dateFormatter.format(Date(event.timestamp)),
+                            text = formattedDate,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -1476,7 +1530,7 @@ fun SnoreEventCard(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "Duration: ${String.format(Locale.US, "%.1f", event.durationSeconds)}s",
+                                    text = durationText,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -1490,7 +1544,7 @@ fun SnoreEventCard(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "Peak: ${event.maxDb.toInt()} dB",
+                                    text = peakDbText,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.error
@@ -1565,19 +1619,19 @@ fun SnoreEventCard(
             ) {
                 AcousticLabel(
                     title = "Max. RMS",
-                    value = String.format(Locale.US, "%.4f", event.maxRms)
+                    value = maxRmsText
                 )
                 AcousticLabel(
                     title = "Mean ZCR",
-                    value = String.format(Locale.US, "%.3f", event.meanZcr)
+                    value = meanZcrText
                 )
                 AcousticLabel(
                     title = "Band Energy",
-                    value = String.format(Locale.US, "%.4f", event.meanBandEnergy)
+                    value = bandEnergyText
                 )
                 AcousticLabel(
                     title = "Low Freq.",
-                    value = "${(event.meanLowFreqRatio * 100).toInt()}%"
+                    value = lowFreqRatioText
                 )
             }
         }
@@ -1631,7 +1685,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Material You / Material 3 Theme Appearance Card
-        item {
+        item(key = "settings_theme_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -1731,7 +1785,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             }
         }
 
-        item {
+        item(key = "settings_dsp_header") {
             Column {
                 Text(
                     text = "DSP Acoustics & Detection Settings",
@@ -1749,7 +1803,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Method 1: RMS dB Volume
-        item {
+        item(key = "settings_rms_method") {
             ConfigureMethodCard(
                 title = "1. Sound Volume (Decibels)",
                 thresholdType = "Minimum threshold",
@@ -1766,7 +1820,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Method 2: Zero crossing rate
-        item {
+        item(key = "settings_zcr_method") {
             ConfigureMethodCard(
                 title = "2. Zero-Crossing Rate (Pitch)",
                 thresholdType = "Maximum threshold",
@@ -1783,7 +1837,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Method 3: Core Snoring Band frequency energy
-        item {
+        item(key = "settings_band_method") {
             ConfigureMethodCard(
                 title = "3. Snoring Frequency Band Energy",
                 thresholdType = "Minimum threshold",
@@ -1800,7 +1854,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Method 4: Low-Frequency Energy ratio
-        item {
+        item(key = "settings_low_freq_method") {
             ConfigureMethodCard(
                 title = "4. Low-Frequency Energy Ratio",
                 thresholdType = "Minimum threshold",
@@ -1817,7 +1871,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Condition 5: Minimum Event Duration (Time Filter)
-        item {
+        item(key = "settings_duration_method") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -1890,7 +1944,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // Simplified Formula Card directly below the DSP settings
-        item {
+        item(key = "settings_dsp_formula") {
             DspFormulaCard(
                 useRms = useRms,
                 rmsDbThreshold = rmsDbThreshold,
@@ -1905,7 +1959,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // WAV Audio Clip recorder toggle
-        item {
+        item(key = "settings_save_audio") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -1945,7 +1999,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         }
 
         // About & Version Information
-        item {
+        item(key = "settings_about_card") {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),

@@ -1,11 +1,13 @@
 package com.aistudio.snoredetector.afkwd.data
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
  * Room Database Model representing a single detected snoring event.
  */
+@Immutable
 @Entity(tableName = "snore_events")
 data class SnoreEvent(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
