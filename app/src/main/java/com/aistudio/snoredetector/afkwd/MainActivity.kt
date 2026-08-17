@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -92,6 +93,7 @@ import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
+import com.aistudio.snoredetector.afkwd.ui.GuideTab
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -174,7 +176,7 @@ class MainActivity : ComponentActivity() {
                                 label = { Text("Dashboard", fontWeight = FontWeight.SemiBold) },
                                 icon = {
                                     Icon(
-                                        imageVector = Icons.Default.Info,
+                                        imageVector = Icons.Default.Home,
                                         contentDescription = "Dashboard"
                                     )
                                 }
@@ -201,6 +203,18 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             )
+                            NavigationBarItem(
+                                selected = selectedTab == 3,
+                                onClick = { selectedTab = 3 },
+                                label = { Text("Guide", fontWeight = FontWeight.SemiBold) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "User Guide"
+                                    )
+                                },
+                                modifier = Modifier.testTag("nav_guide_tab")
+                            )
                         }
                     }
                 ) { innerPadding ->
@@ -219,6 +233,7 @@ class MainActivity : ComponentActivity() {
                                 0 -> DashboardTab(viewModel)
                                 1 -> HistoryTab(viewModel)
                                 2 -> SettingsTab(viewModel)
+                                3 -> GuideTab()
                             }
                         }
                     }
@@ -1414,6 +1429,42 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 }
             }
         }
+
+        // About & Version Information
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("about_app_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "About Snore Detector",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Version ${BuildConfig.VERSION_NAME}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Open Source (FOSS) • 100% On-Device Acoustic Signal Processing",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 
@@ -1731,3 +1782,4 @@ fun ConfigureMethodCard(
         }
     }
 }
+
