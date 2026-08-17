@@ -4,11 +4,14 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
+import com.aistudio.snoredetector.afkwd.data.AudioExportManager
+import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
@@ -43,6 +46,23 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private var mediaPlayer: MediaPlayer? = null
     private val _playingEventId = MutableStateFlow<Int?>(null)
     val playingEventId = _playingEventId.asStateFlow()
+
+    // Multi-Selection state for selective export
+    private val _isMultiSelectMode = MutableStateFlow(false)
+    val isMultiSelectMode = _isMultiSelectMode.asStateFlow()
+
+    private val _selectedEventIds = MutableStateFlow<Set<Int>>(emptySet())
+    val selectedEventIds = _selectedEventIds.asStateFlow()
+
+    // Export progress & status state
+    private val _exportInProgress = MutableStateFlow(false)
+    val exportInProgress = _exportInProgress.asStateFlow()
+
+    private val _exportProgressText = MutableStateFlow<String?>(null)
+    val exportProgressText = _exportProgressText.asStateFlow()
+
+    private val _exportSummary = MutableStateFlow<ExportSummary?>(null)
+    val exportSummary = _exportSummary.asStateFlow()
 
     // Threshold Config State flows
     private val _useRms = MutableStateFlow(prefs.getBoolean("useRms", true))
@@ -293,7 +313,116 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- TEXT/CSV DATA EXPORT ENGINE ---
+    // --- MULTI-SELECTION FOR EXPORT ---
+
+    fun toggleMultiSelectMode(enable: Boolean? = null) {
+        val newMode = enable ?: !_isMultiSelectMode.value
+        _isMultiSelectMode.value = newMode
+        if (!newMode) {
+            _selectedEventIds.value = emptySet()
+        }
+    }
+
+    fun toggleEventSelection(eventId: Int) {
+        val current = _selectedEventIds.value
+        _selectedEventIds.value = if (current.contains(eventId)) {
+            current - eventId
+        } else {
+            current + eventId
+        }
+        if (_selectedEventIds.value.isNotEmpty() && !_isMultiSelectMode.value) {
+            _isMultiSelectMode.value = true
+        }
+    }
+
+    fun selectAllEvents(events: List<SnoreEvent>) {
+        _selectedEventIds.value = events.map { it.id }.toSet()
+        _isMultiSelectMode.value = true
+    }
+
+    fun clearSelection() {
+        _selectedEventIds.value = emptySet()
+        _isMultiSelectMode.value = false
+    }
+
+    fun dismissExportSummary() {
+        _exportSummary.value = null
+    }
+
+    // --- AUDIO & CSV EXPORT ENGINE ---
+
+    /**
+     * Share a single snore event audio file via standard Android ACTION_SEND.
+     */
+    fun getShareSingleAudioIntent(event: SnoreEvent): Intent? {
+        return AudioExportManager.createShareAudioIntent(context, event)
+    }
+
+    /**
+     * Export a single audio recording directly to a user-chosen Document Uri.
+     */
+    fun exportSingleAudio(sourcePath: String, targetUri: Uri, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _exportInProgress.value = true
+            _exportProgressText.value = "Exporting audio recording..."
+            val result = AudioExportManager.exportSingleAudioToUri(context, sourcePath, targetUri)
+            withContext(Dispatchers.Main) {
+                _exportInProgress.value = false
+                _exportProgressText.value = null
+                onComplete(result)
+            }
+        }
+    }
+
+    /**
+     * Export CSV file directly to a user-chosen Document Uri.
+     */
+    fun exportCsv(events: List<SnoreEvent>, targetUri: Uri, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _exportInProgress.value = true
+            _exportProgressText.value = "Exporting CSV log..."
+            val result = AudioExportManager.exportCsvToUri(context, events, targetUri)
+            withContext(Dispatchers.Main) {
+                _exportInProgress.value = false
+                _exportProgressText.value = null
+                onComplete(result)
+            }
+        }
+    }
+
+    /**
+     * Export audio recordings or full bundle (CSV + audio) into a ZIP archive.
+     */
+    fun exportZipBundle(
+        events: List<SnoreEvent>,
+        targetUri: Uri,
+        includeCsv: Boolean,
+        includeAudio: Boolean,
+        onComplete: (ExportSummary) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _exportInProgress.value = true
+            _exportProgressText.value = "Preparing export package (0/${events.size})..."
+            
+            val summary = AudioExportManager.exportZipArchiveToUri(
+                context = context,
+                events = events,
+                destinationUri = targetUri,
+                includeCsv = includeCsv,
+                includeAudio = includeAudio,
+                onProgress = { current, total ->
+                    _exportProgressText.value = "Exporting recording $current of $total..."
+                }
+            )
+
+            withContext(Dispatchers.Main) {
+                _exportInProgress.value = false
+                _exportProgressText.value = null
+                _exportSummary.value = summary
+                onComplete(summary)
+            }
+        }
+    }
 
     /**
      * Generate standard CSV file and retrieve share Intent.
@@ -301,37 +430,16 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun getCsvShareIntent(events: List<SnoreEvent>): Intent? {
         if (events.isEmpty()) return null
         
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        val csvBuilder = StringBuilder()
-        // CSV Headers containing timestamp, dB levels, maxRMS, mean zero crossing, band energy and low frequency energy
-        csvBuilder.append("Timestamp,Datetime,Duration_Seconds,dB_Level,Max_RMS,Mean_ZCR,Mean_BandEnergy,Mean_LowFreqRatio,AudioClip\n")
-        
-        for (e in events) {
-            val formattedDate = sdf.format(Date(e.timestamp))
-            val clipName = e.audioFilePath?.let { File(it).name } ?: "None"
-            csvBuilder.append("${e.timestamp},\"$formattedDate\",${e.durationSeconds},${e.maxDb},${e.maxRms},${e.meanZcr},${e.meanBandEnergy},${e.meanLowFreqRatio},\"$clipName\"\n")
-        }
-
         return try {
-            val cacheDir = File(context.cacheDir, "exports")
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            val exportFile = File(cacheDir, "snore_analytics_redefined.csv")
-            exportFile.writeText(csvBuilder.toString())
-
-            // Utilizing standard local file sharing.
-            // Since we use strict FOSS, we can expose the absolute file sharing via standard Intent.
-            // Under modern strict sharing, we can use FileProvider. But wait, we can also write to standard external cache or simple email text transfer, which is 100% compliant.
-            // Let's build a clean Text Send intent containing the data directly, or refer to FileProvider if configured.
-            // Sharing as content text is highly compatible, lightweight, and requires 0 configuration!
-            // Let's create an Intent that can send the CSV text directly as an email/document, or share the CSV file text safely!
+            val csvContent = AudioExportManager.generateCsvContent(events)
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_SUBJECT, "Snore Detector Session Log")
-                putExtra(Intent.EXTRA_TEXT, csvBuilder.toString())
+                putExtra(Intent.EXTRA_TEXT, csvContent)
             }
             Intent.createChooser(shareIntent, "Share Snoring Log CSV")
         } catch (e: Exception) {
-            Log.e("SnoreVM", "Error writing CSV", e)
+            Log.e("SnoreVM", "Error creating CSV share intent", e)
             null
         }
     }

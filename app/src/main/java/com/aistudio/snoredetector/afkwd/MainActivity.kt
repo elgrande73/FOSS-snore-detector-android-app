@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -20,7 +21,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,25 +37,34 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +77,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -79,6 +89,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -89,9 +100,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
+import com.aistudio.snoredetector.afkwd.data.AudioExportManager
+import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
@@ -846,50 +859,192 @@ fun AmplitudeGraph(points: List<AmplitudePoint>, modifier: Modifier = Modifier) 
 fun HistoryTab(viewModel: SnoreViewModel) {
     val events by viewModel.hLogs.collectAsState()
     val playingEventId by viewModel.playingEventId.collectAsState()
+    val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
+    val selectedEventIds by viewModel.selectedEventIds.collectAsState()
+    val exportInProgress by viewModel.exportInProgress.collectAsState()
+    val exportProgressText by viewModel.exportProgressText.collectAsState()
+    val exportSummary by viewModel.exportSummary.collectAsState()
+
     val context = LocalContext.current
-    
     val dateSdf = remember { SimpleDateFormat("EEEE, MMM dd — hh:mm:ss a", Locale.getDefault()) }
+
+    var showExportDialog by remember { mutableStateOf(false) }
+    var pendingSingleExportEvent by remember { mutableStateOf<SnoreEvent?>(null) }
+
+    // Active subset for export (either selected items or all items)
+    val activeExportEvents = remember(events, isMultiSelectMode, selectedEventIds) {
+        if (isMultiSelectMode && selectedEventIds.isNotEmpty()) {
+            events.filter { selectedEventIds.contains(it.id) }
+        } else {
+            events
+        }
+    }
+
+    // SAF Document Creation Launchers
+    val singleAudioExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/wav")
+    ) { uri ->
+        if (uri != null && pendingSingleExportEvent != null) {
+            val path = pendingSingleExportEvent?.audioFilePath
+            if (path != null) {
+                viewModel.exportSingleAudio(path, uri) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Audio recording saved successfully", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save audio recording", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        pendingSingleExportEvent = null
+    }
+
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportCsv(activeExportEvents, uri) { success ->
+                if (success) {
+                    Toast.makeText(context, "CSV logs saved successfully", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Failed to save CSV file", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val zipBundleExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportZipBundle(
+                events = activeExportEvents,
+                targetUri = uri,
+                includeCsv = true,
+                includeAudio = true,
+                onComplete = { /* summary handled via StateFlow */ }
+            )
+        }
+    }
+
+    val zipAudioOnlyExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportZipBundle(
+                events = activeExportEvents,
+                targetUri = uri,
+                includeCsv = false,
+                includeAudio = true,
+                onComplete = { /* summary handled via StateFlow */ }
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // Top Action Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Tracked Episodes",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            
-            if (events.isNotEmpty()) {
-                Row {
-                    // Export CSV
+            if (isMultiSelectMode) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
+                        onClick = { viewModel.clearSelection() },
+                        modifier = Modifier.size(36.dp).testTag("exit_selection_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Exit selection")
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "${selectedEventIds.size} Selected",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
                         onClick = {
-                            val intent = viewModel.getCsvShareIntent(events)
-                            if (intent != null) {
-                                context.startActivity(intent)
+                            if (selectedEventIds.size == events.size) {
+                                viewModel.clearSelection()
                             } else {
-                                Toast.makeText(context, "Export generation failed", Toast.LENGTH_SHORT).show()
+                                viewModel.selectAllEvents(events)
                             }
                         },
-                        modifier = Modifier.testTag("export_csv_button")
+                        modifier = Modifier.testTag("select_all_button")
                     ) {
-                        Icon(imageVector = Icons.Default.Share, contentDescription = "Export CSV", tint = MaterialTheme.colorScheme.primary)
+                        Text(
+                            text = if (selectedEventIds.size == events.size) "Deselect All" else "Select All",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
 
-                    // Clear Database
+                    // Export Selected
                     IconButton(
-                        onClick = { viewModel.clearAllHistory() },
-                        modifier = Modifier.testTag("clear_history_button")
+                        onClick = { showExportDialog = true },
+                        enabled = selectedEventIds.isNotEmpty(),
+                        modifier = Modifier.testTag("export_selected_button")
                     ) {
-                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Clear logs", tint = MaterialTheme.colorScheme.error)
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Export Selected",
+                            tint = if (selectedEventIds.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = "Tracked Episodes (${events.size})",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                if (events.isNotEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Multi-selection mode toggle
+                        IconButton(
+                            onClick = { viewModel.toggleMultiSelectMode(true) },
+                            modifier = Modifier.testTag("multi_select_toggle_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.List,
+                                contentDescription = "Select episodes",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Export Data & Audio Dialog
+                        IconButton(
+                            onClick = { showExportDialog = true },
+                            modifier = Modifier.testTag("export_csv_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Export Data & Recordings",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Clear Database
+                        IconButton(
+                            onClick = { viewModel.clearAllHistory() },
+                            modifier = Modifier.testTag("clear_history_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Clear logs",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }
@@ -934,10 +1089,32 @@ fun HistoryTab(viewModel: SnoreViewModel) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(events, key = { it.id }) { item ->
+                    val isSelected = selectedEventIds.contains(item.id)
                     SnoreEventCard(
                         event = item,
                         isPlaying = playingEventId == item.id,
+                        isMultiSelectMode = isMultiSelectMode,
+                        isSelected = isSelected,
+                        onSelectionToggle = { viewModel.toggleEventSelection(item.id) },
                         onPlayClick = { viewModel.togglePlayback(item) },
+                        onShareAudioClick = {
+                            val shareIntent = viewModel.getShareSingleAudioIntent(item)
+                            if (shareIntent != null) {
+                                context.startActivity(shareIntent)
+                            } else {
+                                Toast.makeText(context, "Audio recording unavailable for this event", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onExportAudioClick = {
+                            val path = item.audioFilePath
+                            if (path != null && File(path).exists()) {
+                                pendingSingleExportEvent = item
+                                val defaultName = AudioExportManager.formatAudioFileName(item.timestamp, item.id)
+                                singleAudioExportLauncher.launch(defaultName)
+                            } else {
+                                Toast.makeText(context, "Audio file is not available locally", Toast.LENGTH_SHORT).show()
+                            }
+                        },
                         onDeleteClick = { viewModel.deleteEvent(item) },
                         dateFormatter = dateSdf
                     )
@@ -945,92 +1122,429 @@ fun HistoryTab(viewModel: SnoreViewModel) {
             }
         }
     }
+
+    // Export Options Dialog
+    if (showExportDialog) {
+        val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+        val targetCount = activeExportEvents.size
+
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = {
+                Text(
+                    text = if (isMultiSelectMode) "Export $targetCount Selected Events" else "Export Recordings & Data",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Choose an export format for personal analysis or optional review with a healthcare professional:",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Option 1: Complete Bundle (.zip)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showExportDialog = false
+                                zipBundleExportLauncher.launch("SnoreDetector_Export_${todayStr}.zip")
+                            }
+                            .testTag("export_bundle_option"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "📦", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Complete Package (.zip)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Includes CSV logs + original WAV audio files in /audio folder",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Option 2: Audio Only (.zip)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showExportDialog = false
+                                zipAudioOnlyExportLauncher.launch("SnoreDetector_Audio_${todayStr}.zip")
+                            }
+                            .testTag("export_audio_only_option"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "🎵", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Audio Recordings (.zip)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Export original unaltered WAV audio files only",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Option 3: CSV Logs (.csv)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showExportDialog = false
+                                csvExportLauncher.launch("SnoreDetector_Logs_${todayStr}.csv")
+                            }
+                            .testTag("export_csv_file_option"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "📄", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "CSV Session Log (.csv)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Tabular log with timestamps, dB, RMS, ZCR, and audio references",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Option 4: Quick Share CSV
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showExportDialog = false
+                                val shareIntent = viewModel.getCsvShareIntent(activeExportEvents)
+                                if (shareIntent != null) {
+                                    context.startActivity(shareIntent)
+                                }
+                            }
+                            .testTag("quick_share_csv_option"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "📤", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Quick Share CSV Log",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Send CSV text directly via standard Android share sheet",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Privacy & Medical Notice
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "🔒 Privacy & Health Notice",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "• Audio files are stored locally on your device and never uploaded to any remote server.\n• Recordings are provided for personal information and optional discussion with a healthcare professional. Snore Detector is not a clinical diagnostic device.",
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Export Progress Dialog
+    if (exportInProgress) {
+        AlertDialog(
+            onDismissRequest = { /* non-cancellable during write */ },
+            title = {
+                Text(text = "Exporting Data", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = exportProgressText ?: "Writing export files...",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // Export Summary Dialog
+    if (exportSummary != null) {
+        val summary = exportSummary!!
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissExportSummary() },
+            title = {
+                Text(
+                    text = if (summary.success) "Export Completed" else "Export Issue",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (summary.success) {
+                        Text(
+                            text = "✅ Export finished successfully.",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "• ${summary.exportedAudioCount} audio recording(s) exported.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (summary.missingAudioCount > 0) {
+                            Text(
+                                text = "• ${summary.missingAudioCount} event(s) had no local audio clip available.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "❌ Export encountered an error:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = summary.errorMessage ?: "Unknown storage error.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.dismissExportSummary() }) {
+                    Text("Done")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun SnoreEventCard(
     event: SnoreEvent,
     isPlaying: Boolean,
+    isMultiSelectMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionToggle: () -> Unit = {},
     onPlayClick: () -> Unit,
+    onShareAudioClick: () -> Unit = {},
+    onExportAudioClick: () -> Unit = {},
     onDeleteClick: () -> Unit,
     dateFormatter: SimpleDateFormat
 ) {
+    val hasAudio = event.audioFilePath != null && File(event.audioFilePath).exists()
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("snore_event_card_${event.id}"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            .testTag("snore_event_card_${event.id}")
+            .clickable(enabled = isMultiSelectMode) { onSelectionToggle() },
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant
+        ),
         shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+        )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Header: Time and delete
+            // Header: Selection Checkbox / Time and Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = dateFormatter.format(Date(event.timestamp)),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isMultiSelectMode) {
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onSelectionToggle() },
+                            modifier = Modifier.size(32.dp).testTag("event_checkbox_${event.id}"),
+                            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
+                    Column {
+                        Text(
+                            text = dateFormatter.format(Date(event.timestamp)),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 2.dp)
                         ) {
-                            Text(
-                                text = "Duration: ${String.format("%.1f", event.durationSeconds)}s",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "Peak: ${event.maxDb.toInt()} dB",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Duration: ${String.format(Locale.US, "%.1f", event.durationSeconds)}s",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Peak: ${event.maxDb.toInt()} dB",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
 
-                Row {
-                    // Microphonic snippet player button if audio cached
-                    if (event.audioFilePath != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Audio snippet player button
+                    if (hasAudio) {
                         IconButton(
                             onClick = onPlayClick,
-                            modifier = Modifier.size(28.dp).testTag("play_button_${event.id}")
+                            modifier = Modifier.size(32.dp).testTag("play_button_${event.id}")
                         ) {
                             Icon(
                                 imageVector = if (isPlaying) Icons.Default.Warning else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Stop" else "Play Recording",
+                                contentDescription = if (isPlaying) "Stop Recording" else "Play Recording",
                                 tint = if (isPlaying) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Share single audio
+                        IconButton(
+                            onClick = onShareAudioClick,
+                            modifier = Modifier.size(32.dp).testTag("share_audio_button_${event.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share Audio Recording",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Direct save/export single audio
+                        IconButton(
+                            onClick = onExportAudioClick,
+                            modifier = Modifier.size(32.dp).testTag("export_audio_button_${event.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Save Audio File",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
 
                     IconButton(
                         onClick = onDeleteClick,
-                        modifier = Modifier.size(28.dp).testTag("delete_button_${event.id}")
+                        modifier = Modifier.size(32.dp).testTag("delete_button_${event.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Delete,
@@ -1042,7 +1556,7 @@ fun SnoreEventCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Sub details metrics breakdown grid
             Row(
@@ -1051,15 +1565,15 @@ fun SnoreEventCard(
             ) {
                 AcousticLabel(
                     title = "Max. RMS",
-                    value = String.format("%.4f", event.maxRms)
+                    value = String.format(Locale.US, "%.4f", event.maxRms)
                 )
                 AcousticLabel(
                     title = "Mean ZCR",
-                    value = String.format("%.3f", event.meanZcr)
+                    value = String.format(Locale.US, "%.3f", event.meanZcr)
                 )
                 AcousticLabel(
                     title = "Band Energy",
-                    value = String.format("%.4f", event.meanBandEnergy)
+                    value = String.format(Locale.US, "%.4f", event.meanBandEnergy)
                 )
                 AcousticLabel(
                     title = "Low Freq.",
@@ -1782,4 +2296,3 @@ fun ConfigureMethodCard(
         }
     }
 }
-
