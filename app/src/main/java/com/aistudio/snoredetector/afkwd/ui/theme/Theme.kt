@@ -1,38 +1,59 @@
 package com.aistudio.snoredetector.afkwd.ui.theme
 
+import android.app.Activity
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-private val SleekColorScheme = lightColorScheme(
-    primary = Color(0xFF6750A4),
-    onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFE8DEF8),
-    onPrimaryContainer = Color(0xFF1D1B20),
-    secondary = Color(0xFF6750A4),
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFD3E3FD),
-    onSecondaryContainer = Color(0xFF1D1B20),
-    tertiary = Color(0xFFD3E3FD),
-    onTertiary = Color(0xFF1D1B20),
-    background = Color(0xFFFEF7FF),
-    onBackground = Color(0xFF1D1B20),
-    surface = Color(0xFFF3EDF7),
-    onSurface = Color(0xFF1D1B20),
-    surfaceVariant = Color(0xFFFFFFFF),
-    onSurfaceVariant = Color(0xFF49454F),
-    outline = Color(0xFFCAC4D0),
-    error = Color(0xFFB3261E),
-    onError = Color(0xFFFFFFFF)
-)
+enum class ThemeMode {
+    SYSTEM,
+    LIGHT,
+    DARK
+}
 
 @Composable
 fun MyApplicationTheme(
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (themeMode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+
+    val context = LocalContext.current
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window
+            if (window != null) {
+                val insetsController = WindowCompat.getInsetsController(window, view)
+                insetsController.isAppearanceLightStatusBars = !darkTheme
+                insetsController.isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+
     MaterialTheme(
-        colorScheme = SleekColorScheme,
+        colorScheme = colorScheme,
         typography = Typography,
         content = content
     )

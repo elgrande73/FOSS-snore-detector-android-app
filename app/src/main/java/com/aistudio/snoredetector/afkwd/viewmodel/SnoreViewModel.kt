@@ -75,6 +75,20 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _saveAudioClips = MutableStateFlow(prefs.getBoolean("saveAudioClips", true))
     val saveAudioClips = _saveAudioClips.asStateFlow()
 
+    // Material 3 / Material You Theme Preferences
+    private val savedThemeModeStr = prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
+    private val _themeMode = MutableStateFlow(
+        try {
+            com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.valueOf(savedThemeModeStr)
+        } catch (e: Exception) {
+            com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM
+        }
+    )
+    val themeMode = _themeMode.asStateFlow()
+
+    private val _dynamicColor = MutableStateFlow(prefs.getBoolean("dynamicColor", true))
+    val dynamicColor = _dynamicColor.asStateFlow()
+
     // Last measurement timeline persistent cache
     private val _lastSavedTimeline = MutableStateFlow<List<AmplitudePoint>>(emptyList())
     val lastSavedTimeline = _lastSavedTimeline.asStateFlow()
@@ -196,6 +210,16 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSaveAudioClips(value: Boolean) {
         _saveAudioClips.value = value
         prefs.edit().putBoolean("saveAudioClips", value).apply()
+    }
+
+    fun updateThemeMode(mode: com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode) {
+        _themeMode.value = mode
+        prefs.edit().putString("themeMode", mode.name).apply()
+    }
+
+    fun updateDynamicColor(enabled: Boolean) {
+        _dynamicColor.value = enabled
+        prefs.edit().putBoolean("dynamicColor", enabled).apply()
     }
 
     // --- PLAYBACK CONTROLS ---

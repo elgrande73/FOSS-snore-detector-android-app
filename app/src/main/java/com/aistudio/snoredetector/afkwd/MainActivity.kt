@@ -48,10 +48,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +93,7 @@ import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
+import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -104,7 +108,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
+            val themeMode by viewModel.themeMode.collectAsState()
+            val dynamicColor by viewModel.dynamicColor.collectAsState()
+
+            MyApplicationTheme(
+                themeMode = themeMode,
+                dynamicColor = dynamicColor
+            ) {
                 var selectedTab by remember { mutableStateOf(0) }
                 val context = LocalContext.current
                 
@@ -175,7 +185,7 @@ class MainActivity : ComponentActivity() {
                                 label = { Text("History", fontWeight = FontWeight.SemiBold) },
                                 icon = {
                                     Icon(
-                                        imageVector = Icons.Default.List,
+                                        imageVector = Icons.AutoMirrored.Filled.List,
                                         contentDescription = "History Log"
                                     )
                                 }
@@ -373,8 +383,8 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                         .clip(RoundedCornerShape(32.dp))
                         .background(
                             if (isRunning) {
-                                if (isCurrentlySnoring) Color(0x33B3261E) else MaterialTheme.colorScheme.primaryContainer
-                            } else Color(0x3349454F)
+                                if (isCurrentlySnoring) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+                            } else MaterialTheme.colorScheme.surfaceVariant
                         )
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
@@ -397,7 +407,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isRunning) {
-                                if (isCurrentlySnoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                if (isCurrentlySnoring) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
                             } else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -423,12 +433,13 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                         modifier = Modifier.fillMaxSize()
                     ) {
                         // Progress Arc
+                        val arcTrackColor = MaterialTheme.colorScheme.surfaceVariant
                         val arcPrimaryColor = MaterialTheme.colorScheme.primary
                         val arcErrorColor = MaterialTheme.colorScheme.error
                         Canvas(modifier = Modifier.size(190.dp)) {
                             // Track Arc background
                             drawArc(
-                                color = Color(0xFFE8DEF8),
+                                color = arcTrackColor,
                                 startAngle = 135f,
                                 sweepAngle = 270f,
                                 useCenter = false,
@@ -609,7 +620,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                 ) {
                     Text(
                         text = "⚠️ ACTIVE SNORE PATTERN DETECTED & SAVING...",
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onError,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         letterSpacing = 0.5.sp
@@ -880,7 +891,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Icon(
-                        imageVector = Icons.Default.List,
+                        imageVector = Icons.AutoMirrored.Filled.List,
                         contentDescription = "Empty",
                         tint = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.size(64.dp)
@@ -1081,12 +1092,116 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val minDurationSeconds by viewModel.minDurationSeconds.collectAsState()
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
 
+    val themeMode by viewModel.themeMode.collectAsState()
+    val dynamicColor by viewModel.dynamicColor.collectAsState()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Material You / Material 3 Theme Appearance Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().testTag("theme_settings_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Appearance & Theming",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Customize the app theme mode and Material You dynamic color scheme.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+                    )
+
+                    // Theme Mode Selector Chips
+                    Text(
+                        text = "Theme Mode",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            val isSelected = themeMode == mode
+                            val label = when (mode) {
+                                ThemeMode.SYSTEM -> "System"
+                                ThemeMode.LIGHT -> "Light"
+                                ThemeMode.DARK -> "Dark"
+                            }
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { viewModel.updateThemeMode(mode) },
+                                label = { Text(label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                } else null,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                ),
+                                modifier = Modifier.testTag("theme_chip_${mode.name.lowercase()}")
+                            )
+                        }
+                    }
+
+                    // Dynamic Color Switch (Android 12+)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dynamic Color (Material You)",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Derive color palette from your Android wallpaper and system palette.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = dynamicColor,
+                                onCheckedChange = { viewModel.updateDynamicColor(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                ),
+                                modifier = Modifier.testTag("dynamic_color_switch")
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Column {
                 Text(
@@ -1581,7 +1696,7 @@ fun ConfigureMethodCard(
             Text(
                 text = description,
                 fontSize = 11.sp,
-                color = if (isActive) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF888888),
+                color = if (isActive) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(vertical = 6.dp)
             )
 
