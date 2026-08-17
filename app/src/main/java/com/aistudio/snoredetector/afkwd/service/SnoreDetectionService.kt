@@ -137,7 +137,8 @@ class SnoreDetectionService : Service() {
                 rmsDbThreshold = it.getFloatExtra("rmsDbThreshold", 55.0f),
                 zcrThreshold = it.getFloatExtra("zcrThreshold", 0.15f),
                 bandEnergyThreshold = it.getFloatExtra("bandEnergyThreshold", 0.015f),
-                lowFreqRatioThreshold = it.getFloatExtra("lowFreqRatioThreshold", 0.65f)
+                lowFreqRatioThreshold = it.getFloatExtra("lowFreqRatioThreshold", 0.65f),
+                minDurationSeconds = it.getFloatExtra("minDurationSeconds", 1.0f)
             )
         }
 
@@ -333,7 +334,7 @@ class SnoreDetectionService : Service() {
                                 if (elapsedSilenceMs >= 2500L) {
                                     val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
                                     
-                                    if (durationSec >= 1.0 && snoreBlocksCount > 0) {
+                                    if (durationSec >= currentConfig.minDurationSeconds && snoreBlocksCount > 0) {
                                         val avgDb = snoreSumDb / snoreBlocksCount
                                         val avgZcr = snoreSumZcr / snoreBlocksCount
                                         val avgBand = snoreSumBandEnergy / snoreBlocksCount
@@ -388,7 +389,7 @@ class SnoreDetectionService : Service() {
             } finally {
                 if (isSnoringActive && snoreBlocksCount > 0) {
                     val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
-                    if (durationSec >= 1.0) {
+                    if (durationSec >= currentConfig.minDurationSeconds) {
                         val avgDb = snoreSumDb / snoreBlocksCount
                         val avgZcr = snoreSumZcr / snoreBlocksCount
                         val avgBand = snoreSumBandEnergy / snoreBlocksCount

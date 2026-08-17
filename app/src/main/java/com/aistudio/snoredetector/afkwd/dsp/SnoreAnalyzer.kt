@@ -20,7 +20,20 @@ data class AnalysisResult(
 )
 
 /**
- * Configuration of parameters and activation states for the four snore-detection methods.
+ * Configuration of parameters and activation states for the snore-detection methods.
+ *
+ * Logical Relationship:
+ * An audio frame is classified as a snore if and only if ALL activated DSP features
+ * simultaneously meet their respective thresholds (Logical AND).
+ *
+ * Threshold Directions:
+ * 1. RMS Sound Volume: Minimum threshold (dB >= rmsDbThreshold)
+ * 2. Zero-Crossing Rate (ZCR): Maximum threshold (ZCR <= zcrThreshold)
+ * 3. Core Snoring Band Energy: Minimum threshold (energy >= bandEnergyThreshold)
+ * 4. Low-Frequency Energy Ratio: Minimum threshold (ratio >= lowFreqRatioThreshold)
+ *
+ * Time Condition:
+ * Consecutive snore frames must persist for at least minDurationSeconds to be logged as a snore incident.
  */
 data class DetectionConfig(
     // Method Activations
@@ -30,10 +43,13 @@ data class DetectionConfig(
     val useLowFreqRatio: Boolean = true,
 
     // Thresholds
-    val rmsDbThreshold: Float = 55.0f,          // In relative dB (positive scale ~20 - 120 dB)
-    val zcrThreshold: Float = 0.15f,            // Max ZCR for low-pitched snoring rumble (0 to 1)
-    val bandEnergyThreshold: Float = 0.015f,     // Min average frequency magnitude in 100-1000Hz
-    val lowFreqRatioThreshold: Float = 0.65f    // Min ratio of energy below 500Hz to total (0 to 1)
+    val rmsDbThreshold: Float = 55.0f,          // Minimum threshold: in relative dB (positive scale ~20 - 120 dB)
+    val zcrThreshold: Float = 0.15f,            // Maximum threshold: max ZCR for low-pitched snoring rumble (0 to 1)
+    val bandEnergyThreshold: Float = 0.015f,     // Minimum threshold: min average frequency magnitude in 100-1000Hz
+    val lowFreqRatioThreshold: Float = 0.65f,   // Minimum threshold: min ratio of energy below 500Hz to total (0 to 1)
+
+    // Time / Duration Condition
+    val minDurationSeconds: Float = 1.0f        // Minimum duration threshold: min continuous seconds required to log an incident
 )
 
 /**

@@ -1078,6 +1078,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val useLowFreqRatio by viewModel.useLowFreqRatio.collectAsState()
     val lowFreqRatioThreshold by viewModel.lowFreqRatioThreshold.collectAsState()
 
+    val minDurationSeconds by viewModel.minDurationSeconds.collectAsState()
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
 
     LazyColumn(
@@ -1089,20 +1090,177 @@ fun SettingsTab(viewModel: SnoreViewModel) {
         item {
             Column {
                 Text(
-                    text = "Acoustics Configuration",
+                    text = "DSP Acoustics & Detection Settings",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Configure and select the active real-time algorithmic snoring validation metrics. Detections operate on logical matching configurations.",
+                    text = "Configure the 4 digital signal processing (DSP) acoustic filters and the duration threshold. A snore is logged when all enabled filters match simultaneously (Logical AND) for the required duration.",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }
 
-        // Clip recorder toggle
+        // Method 1: RMS dB Volume
+        item {
+            ConfigureMethodCard(
+                title = "1. Sound Volume (Decibels)",
+                thresholdType = "Minimum threshold",
+                comparisonSymbol = "≥",
+                description = "Minimum threshold (Value ≥ Threshold). The incoming sound must reach or exceed this decibel level to be considered. Normal quiet sleep acoustics are typically below 45 dB.",
+                isActive = useRms,
+                onActiveChange = { viewModel.updateUseRms(it) },
+                value = rmsDbThreshold,
+                onValueChange = { viewModel.updateRmsDbThreshold(it) },
+                valueRange = 40.0f..85.0f,
+                labelFormatter = { "${it.toInt()} dB" },
+                testTag = "rms_method"
+            )
+        }
+
+        // Method 2: Zero crossing rate
+        item {
+            ConfigureMethodCard(
+                title = "2. Zero-Crossing Rate (Pitch)",
+                thresholdType = "Maximum threshold",
+                comparisonSymbol = "≤",
+                description = "Maximum threshold (Value ≤ Threshold). Snoring is a low-pitched rumble with few zero-crossings. Sounds with higher frequencies (speech, whispers, hisses) exceed this limit and are filtered out.",
+                isActive = useZcr,
+                onActiveChange = { viewModel.updateUseZcr(it) },
+                value = zcrThreshold,
+                onValueChange = { viewModel.updateZcrThreshold(it) },
+                valueRange = 0.05f..0.35f,
+                labelFormatter = { String.format("%.3f", it) },
+                testTag = "zcr_method"
+            )
+        }
+
+        // Method 3: Core Snoring Band frequency energy
+        item {
+            ConfigureMethodCard(
+                title = "3. Snoring Frequency Band Energy",
+                thresholdType = "Minimum threshold",
+                comparisonSymbol = "≥",
+                description = "Minimum threshold (Value ≥ Threshold). Measures energy concentrated in the 100 Hz – 1,000 Hz human snoring frequency band. Filters out flat background ambient noise.",
+                isActive = useBandEnergy,
+                onActiveChange = { viewModel.updateUseBandEnergy(it) },
+                value = bandEnergyThreshold,
+                onValueChange = { viewModel.updateBandEnergyThreshold(it) },
+                valueRange = 0.005f..0.04f,
+                labelFormatter = { String.format("%.4f", it) },
+                testTag = "band_method"
+            )
+        }
+
+        // Method 4: Low-Frequency Energy ratio
+        item {
+            ConfigureMethodCard(
+                title = "4. Low-Frequency Energy Ratio",
+                thresholdType = "Minimum threshold",
+                comparisonSymbol = "≥",
+                description = "Minimum threshold (Value ≥ Threshold). Percentage of total sound energy located below 500 Hz. Deep airway snoring vibrations are concentrated in this low-frequency zone.",
+                isActive = useLowFreqRatio,
+                onActiveChange = { viewModel.updateUseLowFreqRatio(it) },
+                value = lowFreqRatioThreshold,
+                onValueChange = { viewModel.updateLowFreqRatioThreshold(it) },
+                valueRange = 0.40f..0.90f,
+                labelFormatter = { "${(it * 100).toInt()}%" },
+                testTag = "low_freq_method"
+            )
+        }
+
+        // Condition 5: Minimum Event Duration (Time Filter)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.testTag("duration_method")
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "5. Minimum Event Duration (Time Filter)",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = "Time Condition",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Minimum threshold (Duration ≥ Threshold). The sound must satisfy all active acoustic filters continuously for at least this duration to be logged as a snore incident. Filters out brief noises like coughs, bed creaks, or throat clearing.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Min: Duration ≥ ${String.format("%.1f", minDurationSeconds)} s",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.width(140.dp)
+                        )
+                        Slider(
+                            value = minDurationSeconds,
+                            onValueChange = { viewModel.updateMinDurationSeconds(it) },
+                            valueRange = 0.5f..3.0f,
+                            steps = 24, // 0.1s increments between 0.5s and 3.0s
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("duration_slider"),
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Simplified Formula Card directly below the DSP settings
+        item {
+            DspFormulaCard(
+                useRms = useRms,
+                rmsDbThreshold = rmsDbThreshold,
+                useZcr = useZcr,
+                zcrThreshold = zcrThreshold,
+                useBandEnergy = useBandEnergy,
+                bandEnergyThreshold = bandEnergyThreshold,
+                useLowFreqRatio = useLowFreqRatio,
+                lowFreqRatioThreshold = lowFreqRatioThreshold,
+                minDurationSeconds = minDurationSeconds
+            )
+        }
+
+        // WAV Audio Clip recorder toggle
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -1141,72 +1299,225 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 }
             }
         }
+    }
+}
 
-        // Method 1: RMS dB Volume
-        item {
-            ConfigureMethodCard(
-                title = "1. RMS Sound Amplitude (dB)",
-                description = "Validates the incoming signal strength against standard bedroom physical acoustics dB SPL. Quiet sleep is typically below 45 dB.",
-                isActive = useRms,
-                onActiveChange = { viewModel.updateUseRms(it) },
-                value = rmsDbThreshold,
-                onValueChange = { viewModel.updateRmsDbThreshold(it) },
-                valueRange = 40.0f..85.0f,
-                labelFormatter = { "${it.toInt()} dB" },
-                testTag = "rms_method"
+@Composable
+fun DspFormulaCard(
+    useRms: Boolean,
+    rmsDbThreshold: Float,
+    useZcr: Boolean,
+    zcrThreshold: Float,
+    useBandEnergy: Boolean,
+    bandEnergyThreshold: Float,
+    useLowFreqRatio: Boolean,
+    lowFreqRatioThreshold: Float,
+    minDurationSeconds: Float
+) {
+    val activeMethodsCount = (if (useRms) 1 else 0) +
+            (if (useZcr) 1 else 0) +
+            (if (useBandEnergy) 1 else 0) +
+            (if (useLowFreqRatio) 1 else 0)
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dsp_formula_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Active Detection Formula",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "$activeMethodsCount of 4 DSP Filters Active",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Text(
+                text = "How snore events are determined in the detection algorithm:",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
             )
-        }
 
-        // Method 2: Zero crossing rate
-        item {
-            ConfigureMethodCard(
-                title = "2. Zero-Crossing Rate (ZCR)",
-                description = "Measures high-frequency vs. low-frequency rumbles. Low-pitch breathing snoring logs low crossing frequencies (typically ZCR <= 0.15).",
-                isActive = useZcr,
-                onActiveChange = { viewModel.updateUseZcr(it) },
-                value = zcrThreshold,
-                onValueChange = { viewModel.updateZcrThreshold(it) },
-                valueRange = 0.05f..0.35f,
-                labelFormatter = { String.format("%.3f ZCR", it) },
-                testTag = "zcr_method"
-            )
-        }
+            // Formula Box
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "SNORE DETECTED & LOGGED =",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 0.5.sp
+                    )
 
-        // Method 3: Core Snoring Band frequency energy
-        item {
-            ConfigureMethodCard(
-                title = "3. Snoring Core Band Energy (FFT)",
-                description = "Extracts energy in specific snoring audio spectrum bands (100 Hz to 1000 Hz) using the Cooley-Tukey FFT. Threshold prevents background flat ambient hiss.",
-                isActive = useBandEnergy,
-                onActiveChange = { viewModel.updateUseBandEnergy(it) },
-                value = bandEnergyThreshold,
-                onValueChange = { viewModel.updateBandEnergyThreshold(it) },
-                valueRange = 0.005f..0.04f,
-                labelFormatter = { String.format("%.4f power", it) },
-                testTag = "band_method"
-            )
-        }
+                    if (activeMethodsCount == 0) {
+                        Text(
+                            text = "⚠️ All acoustic filters disabled (Snore detection inactive)",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        var isFirstItem = true
 
-        // Method 4: Low-Frequency Energy ratio
-        item {
-            ConfigureMethodCard(
-                title = "4. Low-Frequency Energy Ratio",
-                description = "Evaluates spectral concentrate below 500 Hz. Deep guttural airway snoring consists of highly concentrated low-pitch vibrations.",
-                isActive = useLowFreqRatio,
-                onActiveChange = { viewModel.updateUseLowFreqRatio(it) },
-                value = lowFreqRatioThreshold,
-                onValueChange = { viewModel.updateLowFreqRatioThreshold(it) },
-                valueRange = 0.40f..0.90f,
-                labelFormatter = { "${(it * 100).toInt()}% ratio" },
-                testTag = "low_freq_method"
+                        // 1. RMS Condition
+                        if (useRms) {
+                            FormulaConditionRow(
+                                isFirst = isFirstItem,
+                                label = "Volume",
+                                condition = "≥ ${rmsDbThreshold.toInt()} dB",
+                                direction = "Minimum threshold"
+                            )
+                            isFirstItem = false
+                        }
+
+                        // 2. ZCR Condition
+                        if (useZcr) {
+                            FormulaConditionRow(
+                                isFirst = isFirstItem,
+                                label = "Zero-Crossing Rate",
+                                condition = "≤ ${String.format("%.3f", zcrThreshold)}",
+                                direction = "Maximum threshold"
+                            )
+                            isFirstItem = false
+                        }
+
+                        // 3. Band Energy Condition
+                        if (useBandEnergy) {
+                            FormulaConditionRow(
+                                isFirst = isFirstItem,
+                                label = "Snore Band Energy",
+                                condition = "≥ ${String.format("%.4f", bandEnergyThreshold)}",
+                                direction = "Minimum threshold"
+                            )
+                            isFirstItem = false
+                        }
+
+                        // 4. Low Freq Ratio Condition
+                        if (useLowFreqRatio) {
+                            FormulaConditionRow(
+                                isFirst = isFirstItem,
+                                label = "Low-Freq Ratio (<500Hz)",
+                                condition = "≥ ${(lowFreqRatioThreshold * 100).toInt()}%",
+                                direction = "Minimum threshold"
+                            )
+                            isFirstItem = false
+                        }
+
+                        // 5. Time Condition
+                        FormulaConditionRow(
+                            isFirst = false,
+                            label = "Continuous Duration",
+                            condition = "≥ ${String.format("%.1f", minDurationSeconds)}s",
+                            direction = "Time condition"
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Logical Rule: Every enabled acoustic feature must be satisfied simultaneously (AND). Once met, the snoring audio must persist continuously for at least the configured duration to be recorded.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lineHeight = 15.sp
             )
         }
     }
 }
 
 @Composable
+fun FormulaConditionRow(
+    isFirst: Boolean,
+    label: String,
+    condition: String,
+    direction: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!isFirst) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 5.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    text = "AND",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+        } else {
+            Spacer(modifier = Modifier.width(36.dp))
+        }
+
+        Text(
+            text = "( $label ",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = condition,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = " )",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text = direction,
+            fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
 fun ConfigureMethodCard(
     title: String,
+    thresholdType: String,
+    comparisonSymbol: String,
     description: String,
     isActive: Boolean,
     onActiveChange: (Boolean) -> Unit,
@@ -1243,6 +1554,29 @@ fun ConfigureMethodCard(
                     )
                 )
             }
+
+            // Direction and type badge
+            Row(
+                modifier = Modifier.padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(
+                            if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "$thresholdType (Value $comparisonSymbol Threshold)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+            }
             
             Text(
                 text = description,
@@ -1258,11 +1592,13 @@ fun ConfigureMethodCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Threshold: ${labelFormatter(value)}",
+                        text = "Min: $comparisonSymbol ${labelFormatter(value)}".let {
+                            if (comparisonSymbol == "≤") "Max: $comparisonSymbol ${labelFormatter(value)}" else it
+                        },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.width(115.dp)
+                        modifier = Modifier.width(125.dp)
                     )
                     Slider(
                         value = value,

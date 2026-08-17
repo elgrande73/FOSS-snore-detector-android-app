@@ -69,6 +69,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _lowFreqRatioThreshold = MutableStateFlow(prefs.getFloat("lowFreqRatioThreshold", 0.65f))
     val lowFreqRatioThreshold = _lowFreqRatioThreshold.asStateFlow()
 
+    private val _minDurationSeconds = MutableStateFlow(prefs.getFloat("minDurationSeconds", 1.0f))
+    val minDurationSeconds = _minDurationSeconds.asStateFlow()
+
     private val _saveAudioClips = MutableStateFlow(prefs.getBoolean("saveAudioClips", true))
     val saveAudioClips = _saveAudioClips.asStateFlow()
 
@@ -128,6 +131,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("bandEnergyThreshold", _bandEnergyThreshold.value)
             putExtra("useLowFreqRatio", _useLowFreqRatio.value)
             putExtra("lowFreqRatioThreshold", _lowFreqRatioThreshold.value)
+            putExtra("minDurationSeconds", _minDurationSeconds.value)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -182,6 +186,11 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun updateLowFreqRatioThreshold(value: Float) {
         _lowFreqRatioThreshold.value = value
         prefs.edit().putFloat("lowFreqRatioThreshold", value).apply()
+    }
+
+    fun updateMinDurationSeconds(value: Float) {
+        _minDurationSeconds.value = value
+        prefs.edit().putFloat("minDurationSeconds", value).apply()
     }
 
     fun updateSaveAudioClips(value: Boolean) {
