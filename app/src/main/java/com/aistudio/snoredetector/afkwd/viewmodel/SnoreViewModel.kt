@@ -95,6 +95,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _saveAudioClips = MutableStateFlow(prefs.getBoolean("saveAudioClips", true))
     val saveAudioClips = _saveAudioClips.asStateFlow()
 
+    private val _notifyOnSnore = MutableStateFlow(prefs.getBoolean("notifyOnSnore", false))
+    val notifyOnSnore = _notifyOnSnore.asStateFlow()
+
     // Material 3 / Material You Theme Preferences
     private val savedThemeModeStr = prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
     private val _themeMode = MutableStateFlow(
@@ -157,6 +160,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun startServiceDetection() {
         val intent = Intent(context, SnoreDetectionService::class.java).apply {
             putExtra("saveAudioClips", _saveAudioClips.value)
+            putExtra("notifyOnSnore", _notifyOnSnore.value)
             putExtra("useRms", _useRms.value)
             putExtra("rmsDbThreshold", _rmsDbThreshold.value)
             putExtra("useZcr", _useZcr.value)
@@ -181,6 +185,15 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- CONFIG UPDATE METHODS ---
+
+    fun updateNotifyOnSnore(value: Boolean) {
+        _notifyOnSnore.value = value
+        prefs.edit().putBoolean("notifyOnSnore", value).apply()
+        // If the service is currently running, pass updated configuration intent
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
+    }
 
     fun updateUseRms(value: Boolean) {
         _useRms.value = value
@@ -257,6 +270,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateLowFreqRatioThreshold(defaultConfig.lowFreqRatioThreshold)
         updateMinDurationSeconds(defaultConfig.minDurationSeconds)
         updateSaveAudioClips(true)
+        updateNotifyOnSnore(false)
         updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
         updateDynamicColor(true)
     }

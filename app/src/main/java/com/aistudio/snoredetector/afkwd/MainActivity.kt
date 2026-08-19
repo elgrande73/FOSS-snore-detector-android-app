@@ -1720,6 +1720,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
 
     val minDurationSeconds by viewModel.minDurationSeconds.collectAsState()
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
+    val notifyOnSnore by viewModel.notifyOnSnore.collectAsState()
 
     val themeMode by viewModel.themeMode.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
@@ -2077,6 +2078,58 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                             checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
                         ),
                         modifier = Modifier.testTag("save_audio_clips_switch")
+                    )
+                }
+            }
+        }
+
+        // Real-Time Snoring Event Notifications toggle (for smartwatches / Gadgetbridge / companion devices)
+        item(key = "settings_notify_on_snore") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().testTag("notify_on_snore_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Real-Time Snore Notifications",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "(Default: Disabled)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            text = "Send an immediate high-priority Android notification when a snoring incident is confirmed. Ideal for vibrating a connected smartwatch via Gadgetbridge or companion notification sync apps.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    Switch(
+                        checked = notifyOnSnore,
+                        onCheckedChange = { viewModel.updateNotifyOnSnore(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        ),
+                        modifier = Modifier.testTag("notify_on_snore_switch")
                     )
                 }
             }

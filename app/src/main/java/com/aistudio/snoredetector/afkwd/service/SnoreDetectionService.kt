@@ -1,5 +1,6 @@
 package com.aistudio.snoredetector.afkwd.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -15,6 +17,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.MainActivity
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
@@ -55,13 +58,16 @@ class SnoreDetectionService : Service() {
 
     // Service parameters
     private var isSaveClipsEnabled: Boolean = true
+    private var isNotifyOnSnoreEnabled: Boolean = false
     private var currentConfig = DetectionConfig()
     private var startTimeMillis: Long = 0L
 
     companion object {
         private const val TAG = "SnoreService"
-        private const val NOTIFICATION_ID = 54321
-        private const val CHANNEL_ID = "snore_detector_service_channel"
+        const val NOTIFICATION_ID = 54321
+        const val EVENT_NOTIFICATION_ID = 54322
+        const val CHANNEL_ID = "snore_detector_service_channel"
+        const val CHANNEL_EVENT_ID = "snore_detector_events_channel"
 
         // Duration of background operation limit: 12 Hours
         private const val LIMIT_DURATION_MS = 12 * 60 * 60 * 1000L
@@ -128,6 +134,7 @@ class SnoreDetectionService : Service() {
         // Parse configurations passed from VM/UI
         intent?.let {
             isSaveClipsEnabled = it.getBooleanExtra("saveAudioClips", true)
+            isNotifyOnSnoreEnabled = it.getBooleanExtra("notifyOnSnore", false)
             
             currentConfig = DetectionConfig(
                 useRms = it.getBooleanExtra("useRms", true),
@@ -247,6 +254,7 @@ class SnoreDetectionService : Service() {
             var isSnoringActive = false
             var snoreStartTime = 0L
             var snoreLastDetectedTime = 0L
+            var hasNotifiedForCurrentEvent = false
             val snoreAudioBuffer = mutableListOf<ShortArray>()
             
             // To compute average values of parameters over a single unified snoring incident:
@@ -301,6 +309,7 @@ class SnoreDetectionService : Service() {
                             if (!isSnoringActive) {
                                 isSnoringActive = true
                                 snoreStartTime = currentMillis
+                                hasNotifiedForCurrentEvent = false
                                 snoreAudioBuffer.clear()
                                 
                                 snoreSumDb = 0.0f
@@ -312,6 +321,18 @@ class SnoreDetectionService : Service() {
                                 
                                 _isCurrentlySnoring.value = true
                                 updateNotification("Snoring audio detected in progress...")
+                            }
+
+                            // Trigger real-time notification immediately when continuous duration meets minDurationSeconds
+                            if (!hasNotifiedForCurrentEvent) {
+                                val activeDurationMs = currentMillis - snoreStartTime
+                                val targetDurationMs = (currentConfig.minDurationSeconds * 1000L).toLong()
+                                if (activeDurationMs >= targetDurationMs) {
+                                    hasNotifiedForCurrentEvent = true
+                                    if (isNotifyOnSnoreEnabled) {
+                                        sendSnoreEventNotification()
+                                    }
+                                }
                             }
 
                             if (snoreAudioBuffer.size < 187) {
@@ -374,6 +395,7 @@ class SnoreDetectionService : Service() {
                                     }
 
                                     isSnoringActive = false
+                                    hasNotifiedForCurrentEvent = false
                                     snoreAudioBuffer.clear()
                                     _isCurrentlySnoring.value = false
                                     updateNotification("Monitoring bedroom acoustics dynamically...")
@@ -459,6 +481,47 @@ class SnoreDetectionService : Service() {
         manager.notify(NOTIFICATION_ID, buildNotification(contentText))
     }
 
+    /**
+     * Send an immediate Android notification when a snoring incident is confirmed.
+     * Delivered on a dedicated high-priority channel suitable for notification-forwarding tools (e.g. Gadgetbridge).
+     */
+    private fun sendSnoreEventNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.w(TAG, "POST_NOTIFICATIONS permission not granted; skipping event notification")
+                return
+            }
+        }
+
+        val mainIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            1,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_EVENT_ID)
+            .setContentTitle("Snoring Detected")
+            .setContentText("A snoring incident was detected.")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(EVENT_NOTIFICATION_ID, notification)
+    }
+
     private fun buildNotification(text: String): Notification {
         val stopIntent = Intent(this, SnoreDetectionService::class.java).apply {
             action = ACTION_STOP_SERVICE
@@ -486,15 +549,28 @@ class SnoreDetectionService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            // Foreground Service Channel (Low importance, persistent)
+            val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Acoustics Monitoring Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Real-time snoring sound detection, FFT analysis, and offline persistence"
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(serviceChannel)
+
+            // Real-Time Snoring Event Alerts Channel (High importance, forwardable to companion smartwatches)
+            val eventChannel = NotificationChannel(
+                CHANNEL_EVENT_ID,
+                "Snoring Event Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Real-time notifications sent immediately when a snoring episode is confirmed"
+                enableVibration(true)
+            }
+            manager.createNotificationChannel(eventChannel)
         }
     }
 
@@ -531,3 +607,4 @@ class SnoreDetectionService : Service() {
         super.onDestroy()
     }
 }
+

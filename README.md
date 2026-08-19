@@ -14,6 +14,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
 
 * **Real-Time Acoustic Signal Processing**
   Live audio analysis computing Sound Volume (dB from RMS), Zero-Crossing Rate (ZCR / Pitch), Snoring Frequency Band Energy (100 Hz – 1,000 Hz), and Low-Frequency Spectral Ratio (<500 Hz)
+  
+* **Real-Time Snoring Alerts & Smartwatch Vibration**
+  Optional immediate Android notification when a snoring incident is confirmed, enabling vibration on connected smartwatches and fitness bands via Gadgetbridge or notification sync tools.
 
 * **100% On-Device & Private**
   Zero external network calls or tracking analytics. Your audio and sleep data never leave your device.

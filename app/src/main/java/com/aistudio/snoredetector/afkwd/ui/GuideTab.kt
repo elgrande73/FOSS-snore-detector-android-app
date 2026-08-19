@@ -229,6 +229,20 @@ fun GuideTab() {
                     HighlightBox(
                         text = "A single night can be misleading. For personal tracking, it is more useful to compare several nights and look for recurring patterns.\n\nYou may also note factors such as sleep position, alcohol consumption, congestion, meal timing or unusual fatigue. This can help you identify personal patterns."
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Real-Time Smartwatch & Companion Alerts:",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "If enabled in Settings, the app generates a high-priority Android notification immediately when a snoring incident is confirmed. You can pair this with FOSS companion apps like Gadgetbridge to make a connected smartwatch or band vibrate during snoring episodes.",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
