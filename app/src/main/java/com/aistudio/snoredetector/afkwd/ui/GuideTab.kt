@@ -179,13 +179,13 @@ fun GuideTab() {
             }
         }
 
-        // SECTION 1: Getting Started
+            // SECTION 1: Getting Started
         if (selectedFilterIndex == 0 || selectedFilterIndex == 1) {
             item(key = "guide_section_1") {
                 GuideSectionCard(
                     sectionNumber = "1",
                     title = "Getting started",
-                    defaultExpanded = true
+                    defaultExpanded = false
                 ) {
                     Text(
                         text = "For the best results:",
@@ -211,7 +211,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "2",
                     title = "Record a night",
-                    defaultExpanded = true
+                    defaultExpanded = false
                 ) {
                     Text(
                         text = "Let Snore Detector run overnight without moving the phone.\n\nIn the morning, review:",
@@ -221,8 +221,8 @@ fun GuideTab() {
                     Spacer(modifier = Modifier.height(8.dp))
                     BulletPoint("Detected snoring events")
                     BulletPoint("Time and duration of events")
-                    BulletPoint("Peak acoustic level")
-                    BulletPoint("Algorithm confidence")
+                    BulletPoint("Peak acoustic level (dB)")
+                    BulletPoint("Low-frequency ratio & frequency energy")
                     BulletPoint("Optional audio clips")
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -237,7 +237,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "3",
                     title = "Understanding the results",
-                    defaultExpanded = true
+                    defaultExpanded = false
                 ) {
                     Text(
                         text = "Snore Detector identifies sounds that match characteristics of snoring. Its measurements are acoustic measurements, not clinical measurements of sleep or breathing.",
@@ -248,28 +248,24 @@ fun GuideTab() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     MetricExplanationItem(
-                        title = "Acoustic level",
-                        description = "Shows how strong the recorded audio signal was. Unless specifically calibrated, this should not be interpreted as a laboratory-accurate sound-pressure measurement."
+                        title = "Acoustic level (Sound Volume in Decibels)",
+                        description = "Shows how strong the recorded audio signal was in decibels (dB) calculated from RMS power. Unless specifically calibrated, this should not be interpreted as a laboratory-accurate sound-pressure measurement."
                     )
                     MetricExplanationItem(
-                        title = "RMS power",
-                        description = "Describes the average energy/amplitude of the audio signal."
+                        title = "Zero-Crossing Rate (ZCR / Pitch)",
+                        description = "Describes how often the audio waveform crosses zero. Snoring is a low-pitched rumble with few zero-crossings, distinguishing it from higher-pitched sounds."
                     )
                     MetricExplanationItem(
-                        title = "Zero-Crossing Rate (ZCR)",
-                        description = "Describes how often the audio waveform crosses zero. It can help distinguish different types of sounds."
+                        title = "Snoring Frequency Band Energy",
+                        description = "Measures acoustic energy concentrated in the 100 Hz – 1,000 Hz human snoring frequency band, filtering out flat background noise."
                     )
                     MetricExplanationItem(
-                        title = "Snore-band energy",
-                        description = "Measures acoustic energy in the frequency range used by the snoring detector. Snoring commonly contains substantial lower-frequency acoustic components."
+                        title = "Low-Frequency Energy Ratio",
+                        description = "Compares energy below 500 Hz with total spectral energy. Deep airway snoring vibrations are concentrated in this low-frequency zone."
                     )
                     MetricExplanationItem(
-                        title = "Low-frequency spectral ratio",
-                        description = "Compares lower-frequency energy with broader spectral energy and can help distinguish snoring-like sounds from other sounds."
-                    )
-                    MetricExplanationItem(
-                        title = "Algorithm confidence",
-                        description = "This is a score produced by the detection algorithm. It is not the probability of having sleep apnea and is not a medical severity score."
+                        title = "Event Duration",
+                        description = "The duration in seconds during which the sound continuously satisfied all active acoustic criteria."
                     )
                 }
             }
@@ -281,7 +277,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "4",
                     title = "No snoring detected?",
-                    defaultExpanded = true
+                    defaultExpanded = false
                 ) {
                     Text(
                         text = "\"No detection\" does not necessarily mean that you did not snore.\n\nPossible reasons include:",
@@ -324,7 +320,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "5",
                     title = "What can help with snoring?",
-                    defaultExpanded = true,
+                    defaultExpanded = false,
                     badgeText = "Evidence-Based Lifestyle Factors",
                     badgeColor = MaterialTheme.colorScheme.primaryContainer
                 ) {
@@ -363,7 +359,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "6",
                     title = "Commonly suggested lifestyle ideas — evidence is limited or unclear",
-                    defaultExpanded = true,
+                    defaultExpanded = false,
                     badgeText = "🟡 Evidence: Limited / Unclear",
                     badgeColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
                 ) {
@@ -422,7 +418,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "7",
                     title = "When should I talk to a doctor?",
-                    defaultExpanded = true,
+                    defaultExpanded = false,
                     badgeText = "Important Medical Guidance",
                     badgeColor = MaterialTheme.colorScheme.errorContainer
                 ) {
@@ -458,7 +454,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "8",
                     title = "What Snore Detector can and cannot tell you",
-                    defaultExpanded = true
+                    defaultExpanded = false
                 ) {
                     Text(
                         text = "The app analyzes sound, not your complete sleep physiology.",
@@ -545,7 +541,7 @@ fun GuideTab() {
                 GuideSectionCard(
                     sectionNumber = "9",
                     title = "Privacy & FOSS",
-                    defaultExpanded = true,
+                    defaultExpanded = false,
                     badgeText = "100% On-Device & FOSS",
                     badgeColor = MaterialTheme.colorScheme.primaryContainer
                 ) {
@@ -630,7 +626,7 @@ fun GuideTab() {
 fun GuideSectionCard(
     sectionNumber: String,
     title: String,
-    defaultExpanded: Boolean = true,
+    defaultExpanded: Boolean = false,
     badgeText: String? = null,
     badgeColor: Color = MaterialTheme.colorScheme.secondaryContainer,
     content: @Composable () -> Unit
@@ -781,3 +777,4 @@ fun MetricExplanationItem(title: String, description: String) {
         )
     }
 }
+

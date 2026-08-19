@@ -13,22 +13,22 @@ Designed from the ground up for privacy and performance, all digital signal proc
 ## 🌟 Key Features
 
 * **Real-Time Acoustic Signal Processing**
-  Live audio analysis of decibel levels, RMS power, Zero-Crossing Rate (ZCR), snore band spectral energy (100 Hz – 1 kHz), and low-frequency spectral ratio.
+  Live audio analysis computing Sound Volume (dB from RMS), Zero-Crossing Rate (ZCR / Pitch), Snoring Frequency Band Energy (100 Hz – 1,000 Hz), and Low-Frequency Spectral Ratio (<500 Hz)
 
 * **100% On-Device & Private**
   Zero external network calls or tracking analytics. Your audio and sleep data never leave your device.
 
-* **Customizable DSP Algorithms**
-  Adjust detection sensitivity and enable or disable individual signal processing algorithms directly in settings.
+* **Configurable DSP Detection Criteria**
+  Customize thresholds for each of the 4 DSP acoustic filters and minimum continuous event duration (default 1.0s), with single-tap "Restore All Defaults".
 
 * **Local Event Logging**
-  Records detected snoring episodes with timestamps, peak decibels, duration, and algorithm match confidence.
+  Records detected snoring episodes with timestamps, peak sound volume (dB), duration, and acoustic metrics.
 
 * **Audio Clip Capturing**
   Option to record and save short `.wav` clips of snoring episodes for playback directly within the app history.
 
 * **Data Export & Sovereignty**
-  Export your entire acoustic detection history to CSV format for external analysis or medical consultation.
+  Export your detection history and recordings as a complete `.zip` bundle (CSV + WAV files) or CSV format for personal analysis or medical consultation.
 
 * **Modern Material 3 UI**
   Built with Jetpack Compose following the Sleek Interface theme, edge-to-edge layout, and dark/light adaptive design.

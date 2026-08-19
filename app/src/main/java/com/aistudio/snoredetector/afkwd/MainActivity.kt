@@ -911,11 +911,13 @@ fun HistoryTab(viewModel: SnoreViewModel) {
     val exportInProgress by viewModel.exportInProgress.collectAsState()
     val exportProgressText by viewModel.exportProgressText.collectAsState()
     val exportSummary by viewModel.exportSummary.collectAsState()
+    val minDurationSeconds by viewModel.minDurationSeconds.collectAsState()
 
     val context = LocalContext.current
     val dateSdf = remember { SimpleDateFormat("EEEE, MMM dd — hh:mm:ss a", Locale.getDefault()) }
 
     var showExportDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
     var pendingSingleExportEvent by remember { mutableStateOf<SnoreEvent?>(null) }
 
     // Active subset for export (either selected items or all items)
@@ -1083,7 +1085,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
 
                         // Clear Database
                         IconButton(
-                            onClick = { viewModel.clearAllHistory() },
+                            onClick = { showClearHistoryDialog = true },
                             modifier = Modifier.testTag("clear_history_button")
                         ) {
                             Icon(
@@ -1123,7 +1125,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Turn on the acoustics monitor on dashboard. Valid continuous snoring incidents exceeding 1.0s are registered here.",
+                        text = "Turn on the acoustics monitor on dashboard. Valid continuous snoring incidents exceeding ${String.format(Locale.US, "%.1f", minDurationSeconds)}s are registered here.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -1453,6 +1455,50 @@ fun HistoryTab(viewModel: SnoreViewModel) {
             }
         )
     }
+
+    // Confirmation Dialog for Clearing History Logs
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Clear All History?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete all recorded snoring events and associated local audio recordings? This action cannot be undone.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAllHistory()
+                        showClearHistoryDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Clear All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -1678,6 +1724,9 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val themeMode by viewModel.themeMode.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
 
+    val context = LocalContext.current
+    var showResetSettingsDialog by remember { mutableStateOf(false) }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1693,12 +1742,23 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 modifier = Modifier.fillMaxWidth().testTag("theme_settings_card")
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Appearance & Theming",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Appearance & Theming",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Default: System",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(
                         text = "Customize the app theme mode and Material You dynamic color scheme.",
                         fontSize = 12.sp,
@@ -1815,6 +1875,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateRmsDbThreshold(it) },
                 valueRange = 40.0f..85.0f,
                 labelFormatter = { "${it.toInt()} dB" },
+                defaultValueLabel = "55 dB",
                 testTag = "rms_method"
             )
         }
@@ -1832,6 +1893,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateZcrThreshold(it) },
                 valueRange = 0.05f..0.35f,
                 labelFormatter = { String.format("%.3f", it) },
+                defaultValueLabel = "0.150",
                 testTag = "zcr_method"
             )
         }
@@ -1849,6 +1911,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateBandEnergyThreshold(it) },
                 valueRange = 0.005f..0.04f,
                 labelFormatter = { String.format("%.4f", it) },
+                defaultValueLabel = "0.0150",
                 testTag = "band_method"
             )
         }
@@ -1866,6 +1929,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateLowFreqRatioThreshold(it) },
                 valueRange = 0.40f..0.90f,
                 labelFormatter = { "${(it * 100).toInt()}%" },
+                defaultValueLabel = "65%",
                 testTag = "low_freq_method"
             )
         }
@@ -1903,6 +1967,26 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Duration threshold (Continuous persistence)",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Default: 1.0s",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
 
                     Text(
@@ -1998,6 +2082,54 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             }
         }
 
+        // Restore / Reset All Settings and Parameters Card
+        item(key = "settings_reset_defaults_card") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("reset_settings_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Reset Settings & Parameters",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Text(
+                        text = "Restore all 4 DSP acoustic filters, threshold parameters, minimum duration condition (1.0s), audio recording preference, and appearance settings back to their source-of-truth defaults.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = { showResetSettingsDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("restore_defaults_button"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Restore All Defaults",
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
         // About & Version Information
         item(key = "settings_about_card") {
             Card(
@@ -2033,6 +2165,43 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // Confirmation Dialog for Resetting Settings & Parameters
+    if (showResetSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetSettingsDialog = false },
+            title = {
+                Text(
+                    text = "Restore Default Settings?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "This will reset all detection parameters, acoustic thresholds, audio recording preferences, and theming options to their original default values. Your recorded history logs will not be affected.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.resetAllSettingsToDefaults()
+                        showResetSettingsDialog = false
+                        Toast.makeText(context, "All settings restored to defaults", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Restore Defaults")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetSettingsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -2259,6 +2428,7 @@ fun ConfigureMethodCard(
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     labelFormatter: (Float) -> String,
+    defaultValueLabel: String? = null,
     testTag: String
 ) {
     Card(
@@ -2289,9 +2459,12 @@ fun ConfigureMethodCard(
                 )
             }
 
-            // Direction and type badge
+            // Direction and type badge + Default value badge
             Row(
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -2308,6 +2481,15 @@ fun ConfigureMethodCard(
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                if (defaultValueLabel != null) {
+                    Text(
+                        text = "Default: $defaultValueLabel",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -2350,3 +2532,4 @@ fun ConfigureMethodCard(
         }
     }
 }
+

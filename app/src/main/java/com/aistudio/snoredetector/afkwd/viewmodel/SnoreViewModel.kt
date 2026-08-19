@@ -242,6 +242,25 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("dynamicColor", enabled).apply()
     }
 
+    /**
+     * Restore all DSP detection parameters and app preferences to their source-of-truth default values.
+     */
+    fun resetAllSettingsToDefaults() {
+        val defaultConfig = com.aistudio.snoredetector.afkwd.dsp.DetectionConfig()
+        updateUseRms(defaultConfig.useRms)
+        updateRmsDbThreshold(defaultConfig.rmsDbThreshold)
+        updateUseZcr(defaultConfig.useZcr)
+        updateZcrThreshold(defaultConfig.zcrThreshold)
+        updateUseBandEnergy(defaultConfig.useBandEnergy)
+        updateBandEnergyThreshold(defaultConfig.bandEnergyThreshold)
+        updateUseLowFreqRatio(defaultConfig.useLowFreqRatio)
+        updateLowFreqRatioThreshold(defaultConfig.lowFreqRatioThreshold)
+        updateMinDurationSeconds(defaultConfig.minDurationSeconds)
+        updateSaveAudioClips(true)
+        updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
+        updateDynamicColor(true)
+    }
+
     // --- PLAYBACK CONTROLS ---
 
     fun togglePlayback(event: SnoreEvent) {
@@ -491,3 +510,4 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 }
+
