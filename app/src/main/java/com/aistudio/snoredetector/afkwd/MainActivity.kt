@@ -98,6 +98,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import com.aistudio.snoredetector.afkwd.data.ErrorLog
+import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -1042,6 +1044,7 @@ fun AmplitudeGraph(points: List<AmplitudePoint>, modifier: Modifier = Modifier) 
 @Composable
 fun HistoryTab(viewModel: SnoreViewModel) {
     val events by viewModel.hLogs.collectAsState()
+    val errorLogs by viewModel.errorLogs.collectAsState()
     val playingEventId by viewModel.playingEventId.collectAsState()
     val isMultiSelectMode by viewModel.isMultiSelectMode.collectAsState()
     val selectedEventIds by viewModel.selectedEventIds.collectAsState()
@@ -1053,9 +1056,13 @@ fun HistoryTab(viewModel: SnoreViewModel) {
     val context = LocalContext.current
     val dateSdf = remember { SimpleDateFormat("EEEE, MMM dd — hh:mm:ss a", Locale.getDefault()) }
 
+    var historyTabFilter by remember { mutableStateOf(0) } // 0 = Episodes, 1 = Error Logs
     var showExportDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
+    var showClearErrorsDialog by remember { mutableStateOf(false) }
     var pendingSingleExportEvent by remember { mutableStateOf<SnoreEvent?>(null) }
+    var pendingExportErrorLog by remember { mutableStateOf<ErrorLog?>(null) }
+    var selectedErrorLogForDetails by remember { mutableStateOf<ErrorLog?>(null) }
 
     // Active subset for export (either selected items or all items)
     val activeExportEvents = remember(events, isMultiSelectMode, selectedEventIds) {
@@ -1127,183 +1134,284 @@ fun HistoryTab(viewModel: SnoreViewModel) {
         }
     }
 
+    // SAF Plain Text (.txt) Error Log Export Launcher
+    val txtErrorLogExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null && pendingExportErrorLog != null) {
+            viewModel.exportErrorLogToUri(pendingExportErrorLog!!, uri) { success ->
+                if (success) {
+                    Toast.makeText(context, "Error log exported as plain text (.txt)", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Failed to export error log", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        pendingExportErrorLog = null
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // Top Action Bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isMultiSelectMode) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { viewModel.clearSelection() },
-                        modifier = Modifier.size(36.dp).testTag("exit_selection_button")
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Exit selection")
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "${selectedEventIds.size} Selected",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = {
-                            if (selectedEventIds.size == events.size) {
-                                viewModel.clearSelection()
-                            } else {
-                                viewModel.selectAllEvents(events)
-                            }
-                        },
-                        modifier = Modifier.testTag("select_all_button")
-                    ) {
-                        Text(
-                            text = if (selectedEventIds.size == events.size) "Deselect All" else "Select All",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Export Selected
-                    IconButton(
-                        onClick = { showExportDialog = true },
-                        enabled = selectedEventIds.isNotEmpty(),
-                        modifier = Modifier.testTag("export_selected_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Export Selected",
-                            tint = if (selectedEventIds.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                        )
-                    }
-                }
-            } else {
-                Text(
-                    text = "Tracked Episodes (${events.size})",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
+        // Category switch chips (only displayed if error logs exist in database)
+        if (errorLogs.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = historyTabFilter == 0,
+                    onClick = { historyTabFilter = 0 },
+                    label = { Text("Episodes (${events.size})") },
+                    modifier = Modifier.testTag("filter_episodes_tab")
                 )
-
-                if (events.isNotEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Multi-selection mode toggle
-                        IconButton(
-                            onClick = { viewModel.toggleMultiSelectMode(true) },
-                            modifier = Modifier.testTag("multi_select_toggle_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.List,
-                                contentDescription = "Select episodes",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        // Export Data & Audio Dialog
-                        IconButton(
-                            onClick = { showExportDialog = true },
-                            modifier = Modifier.testTag("export_csv_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = "Export Data & Recordings",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        // Clear Database
-                        IconButton(
-                            onClick = { showClearHistoryDialog = true },
-                            modifier = Modifier.testTag("clear_history_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Clear logs",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
+                FilterChip(
+                    selected = historyTabFilter == 1,
+                    onClick = { historyTabFilter = 1 },
+                    label = { Text("⚠️ System Errors (${errorLogs.size})") },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    modifier = Modifier.testTag("filter_errors_tab")
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (events.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
+        // Show Error Logs View if chosen
+        if (historyTabFilter == 1 && errorLogs.isNotEmpty()) {
+            // Error logs top action bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "System Error Logs (${errorLogs.size})",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+
+                IconButton(
+                    onClick = { showClearErrorsDialog = true },
+                    modifier = Modifier.testTag("clear_errors_button")
+                ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Empty",
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "History logs are currently empty.",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Turn on the acoustics monitor on dashboard. Valid continuous snoring incidents exceeding ${String.format(Locale.US, "%.1f", minDurationSeconds)}s are registered here.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear all error logs",
+                        tint = MaterialTheme.colorScheme.error
                     )
                 }
             }
-        } else {
+
+            Spacer(modifier = Modifier.height(10.dp))
+
             LazyColumn(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(events, key = { it.id }) { item ->
-                    val isSelected = selectedEventIds.contains(item.id)
-                    SnoreEventCard(
-                        event = item,
-                        isPlaying = playingEventId == item.id,
-                        isMultiSelectMode = isMultiSelectMode,
-                        isSelected = isSelected,
-                        onSelectionToggle = { viewModel.toggleEventSelection(item.id) },
-                        onPlayClick = { viewModel.togglePlayback(item) },
-                        onShareAudioClick = {
-                            val shareIntent = viewModel.getShareSingleAudioIntent(item)
-                            if (shareIntent != null) {
-                                context.startActivity(shareIntent)
-                            } else {
-                                Toast.makeText(context, "Audio recording unavailable for this event", Toast.LENGTH_SHORT).show()
-                            }
+                items(errorLogs, key = { it.id }) { logItem ->
+                    ErrorLogCard(
+                        log = logItem,
+                        onExportTxtClick = {
+                            pendingExportErrorLog = logItem
+                            val fileName = "SnoreDetector_Error_${logItem.id}_${logItem.timestamp}.txt"
+                            txtErrorLogExportLauncher.launch(fileName)
                         },
-                        onExportAudioClick = {
-                            val path = item.audioFilePath
-                            if (!path.isNullOrEmpty()) {
-                                pendingSingleExportEvent = item
-                                val defaultName = AudioExportManager.formatAudioFileName(item.timestamp, item.id)
-                                singleAudioExportLauncher.launch(defaultName)
-                            } else {
-                                Toast.makeText(context, "Audio file is not available locally", Toast.LENGTH_SHORT).show()
-                            }
+                        onShareTxtClick = {
+                            val shareIntent = viewModel.getShareErrorLogIntent(logItem)
+                            context.startActivity(shareIntent)
                         },
-                        onDeleteClick = { viewModel.deleteEvent(item) },
+                        onViewDetailsClick = {
+                            selectedErrorLogForDetails = logItem
+                        },
+                        onDeleteClick = {
+                            viewModel.deleteErrorLog(logItem)
+                        },
                         dateFormatter = dateSdf
                     )
+                }
+            }
+        } else {
+            // Standard Snoring Episodes View
+            // Top Action Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isMultiSelectMode) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { viewModel.clearSelection() },
+                            modifier = Modifier.size(36.dp).testTag("exit_selection_button")
+                        ) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Exit selection")
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "${selectedEventIds.size} Selected",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = {
+                                if (selectedEventIds.size == events.size) {
+                                    viewModel.clearSelection()
+                                } else {
+                                    viewModel.selectAllEvents(events)
+                                }
+                            },
+                            modifier = Modifier.testTag("select_all_button")
+                        ) {
+                            Text(
+                                text = if (selectedEventIds.size == events.size) "Deselect All" else "Select All",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Export Selected
+                        IconButton(
+                            onClick = { showExportDialog = true },
+                            enabled = selectedEventIds.isNotEmpty(),
+                            modifier = Modifier.testTag("export_selected_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Export Selected",
+                                tint = if (selectedEventIds.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = "Tracked Episodes (${events.size})",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    if (events.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Multi-selection mode toggle
+                            IconButton(
+                                onClick = { viewModel.toggleMultiSelectMode(true) },
+                                modifier = Modifier.testTag("multi_select_toggle_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.List,
+                                    contentDescription = "Select episodes",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // Export Data & Audio Dialog
+                            IconButton(
+                                onClick = { showExportDialog = true },
+                                modifier = Modifier.testTag("export_csv_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Export Data & Recordings",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            // Clear Database
+                            IconButton(
+                                onClick = { showClearHistoryDialog = true },
+                                modifier = Modifier.testTag("clear_history_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Clear logs",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (events.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Empty",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "History logs are currently empty.",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Turn on the acoustics monitor on dashboard. Valid continuous snoring incidents exceeding ${String.format(Locale.US, "%.1f", minDurationSeconds)}s are registered here.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(events, key = { it.id }) { item ->
+                        val isSelected = selectedEventIds.contains(item.id)
+                        SnoreEventCard(
+                            event = item,
+                            isPlaying = playingEventId == item.id,
+                            isMultiSelectMode = isMultiSelectMode,
+                            isSelected = isSelected,
+                            onSelectionToggle = { viewModel.toggleEventSelection(item.id) },
+                            onPlayClick = { viewModel.togglePlayback(item) },
+                            onShareAudioClick = {
+                                val shareIntent = viewModel.getShareSingleAudioIntent(item)
+                                if (shareIntent != null) {
+                                    context.startActivity(shareIntent)
+                                } else {
+                                    Toast.makeText(context, "Audio recording unavailable for this event", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onExportAudioClick = {
+                                val path = item.audioFilePath
+                                if (!path.isNullOrEmpty()) {
+                                    pendingSingleExportEvent = item
+                                    val defaultName = AudioExportManager.formatAudioFileName(item.timestamp, item.id)
+                                    singleAudioExportLauncher.launch(defaultName)
+                                } else {
+                                    Toast.makeText(context, "Audio file is not available locally", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onDeleteClick = { viewModel.deleteEvent(item) },
+                            dateFormatter = dateSdf
+                        )
+                    }
                 }
             }
         }
@@ -1636,6 +1744,353 @@ fun HistoryTab(viewModel: SnoreViewModel) {
             }
         )
     }
+
+    // Confirmation Dialog for Clearing Error Logs
+    if (showClearErrorsDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearErrorsDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Clear All System Error Logs?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to clear all error diagnostic entries? This will not affect your tracked snoring sessions.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAllErrorLogs()
+                        showClearErrorsDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Clear Error Logs")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearErrorsDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Error Log Details Dialog
+    if (selectedErrorLogForDetails != null) {
+        val log = selectedErrorLogForDetails!!
+        ErrorLogDetailsDialog(
+            log = log,
+            onDismiss = { selectedErrorLogForDetails = null },
+            onExportTxt = {
+                pendingExportErrorLog = log
+                selectedErrorLogForDetails = null
+                val fileName = "SnoreDetector_Error_${log.id}_${log.timestamp}.txt"
+                txtErrorLogExportLauncher.launch(fileName)
+            },
+            onShareTxt = {
+                val shareIntent = viewModel.getShareErrorLogIntent(log)
+                context.startActivity(shareIntent)
+            },
+            dateFormatter = dateSdf
+        )
+    }
+}
+
+@Composable
+fun ErrorLogCard(
+    log: ErrorLog,
+    onExportTxtClick: () -> Unit,
+    onShareTxtClick: () -> Unit,
+    onViewDetailsClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    dateFormatter: SimpleDateFormat
+) {
+    val formattedDate = remember(log.timestamp) { dateFormatter.format(Date(log.timestamp)) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("error_log_card_${log.id}"),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header: Error Type Badge + Timestamp + Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.error)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = log.errorType,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onError
+                            )
+                        }
+                        if (log.component.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = log.component,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = formattedDate,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Export to .txt
+                    IconButton(
+                        onClick = onExportTxtClick,
+                        modifier = Modifier.size(32.dp).testTag("export_error_log_${log.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Export Error Log (.txt)",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    // Share .txt
+                    IconButton(
+                        onClick = onShareTxtClick,
+                        modifier = Modifier.size(32.dp).testTag("share_error_log_${log.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Share Error Log",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Delete error log
+                    IconButton(
+                        onClick = onDeleteClick,
+                        modifier = Modifier.size(32.dp).testTag("delete_error_log_${log.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Error Log",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Error Message
+            Text(
+                text = log.message,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 18.sp
+            )
+
+            // Diagnostic summary
+            if (log.diagnosticDetails.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                val firstLine = log.diagnosticDetails.lines().firstOrNull { it.isNotBlank() } ?: ""
+                Text(
+                    text = firstLine,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 2
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Action row to view full details
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = onViewDetailsClick,
+                    modifier = Modifier.testTag("details_error_btn_${log.id}")
+                ) {
+                    Text(
+                        text = "View Full Diagnostics & Trace",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ErrorLogDetailsDialog(
+    log: ErrorLog,
+    onDismiss: () -> Unit,
+    onExportTxt: () -> Unit,
+    onShareTxt: () -> Unit,
+    dateFormatter: SimpleDateFormat
+) {
+    val formattedDate = remember(log.timestamp) { dateFormatter.format(Date(log.timestamp)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "Error Diagnostics #${log.id}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Type & Timestamp
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Error Type: ${log.errorType}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "Timestamp: $formattedDate",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (log.component.isNotEmpty()) {
+                            Text(
+                                text = "Component: ${log.component}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Message
+                Text(
+                    text = "Message:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = log.message,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                // Diagnostics Details
+                if (log.diagnosticDetails.isNotBlank()) {
+                    Text(
+                        text = "Diagnostic Details & Trace:",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = log.diagnosticDetails,
+                            fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onShareTxt) {
+                    Text("Share Text")
+                }
+                Button(onClick = onExportTxt) {
+                    Text("Export .txt")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable

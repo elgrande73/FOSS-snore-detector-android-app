@@ -18,6 +18,8 @@ import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
+import com.aistudio.snoredetector.afkwd.data.ErrorLog
+import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
@@ -47,8 +49,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: SnoreRepository
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
-    // Central state synchronization of DB SnoreEvents
+    // Central state synchronization of DB SnoreEvents & ErrorLogs
     val hLogs: StateFlow<List<SnoreEvent>>
+    val errorLogs: StateFlow<List<ErrorLog>>
 
     // Media Player state
     private var mediaPlayer: MediaPlayer? = null
@@ -152,10 +155,17 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val database = AppDatabase.getDatabase(context)
-        repository = SnoreRepository(database.snoreDao())
+        repository = SnoreRepository(database.snoreDao(), database.errorLogDao())
         
         // Expose db stream directly to view
         hLogs = repository.allEvents.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+        // Expose error log stream to view (empty during normal, error-free operation)
+        errorLogs = repository.allErrorLogs.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
@@ -366,6 +376,14 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e("SnoreVM", "Playback failed", e)
                 _playingEventId.value = null
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "PLAYBACK_ERROR",
+                    message = "Audio playback failed for event #${event.id}: ${e.message}",
+                    throwable = e,
+                    component = "MediaPlayer",
+                    additionalDiagnostics = mapOf("FilePath" to path, "EventId" to event.id.toString())
+                )
             }
         }
     }
@@ -410,6 +428,39 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e("SnoreVM", "Failed to clear audio files", e)
             }
             repository.clearHistory()
+        }
+    }
+
+    // --- ERROR LOG ACTIONS ---
+
+    fun deleteErrorLog(log: ErrorLog) {
+        viewModelScope.launch {
+            repository.deleteErrorLogById(log.id)
+        }
+    }
+
+    fun clearAllErrorLogs() {
+        viewModelScope.launch {
+            repository.clearErrorLogs()
+        }
+    }
+
+    fun getShareErrorLogIntent(log: ErrorLog): Intent {
+        val text = ErrorLogger.formatAsPlainText(log)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Snore Detector Error Log - ${log.errorType}")
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        return Intent.createChooser(shareIntent, "Share Error Log")
+    }
+
+    fun exportErrorLogToUri(log: ErrorLog, targetUri: Uri, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val success = ErrorLogger.exportErrorLogToUri(context, log, targetUri)
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
         }
     }
 
@@ -465,7 +516,28 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             _exportInProgress.value = true
             _exportProgressText.value = "Exporting audio recording..."
-            val result = AudioExportManager.exportSingleAudioToUri(context, sourcePath, targetUri)
+            val result = try {
+                AudioExportManager.exportSingleAudioToUri(context, sourcePath, targetUri)
+            } catch (e: Exception) {
+                Log.e("SnoreVM", "Single audio export failed", e)
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "EXPORT_AUDIO_ERROR",
+                    message = "Failed to export audio to selected URI: ${e.message}",
+                    throwable = e,
+                    component = "AudioExportManager",
+                    additionalDiagnostics = mapOf("SourcePath" to sourcePath)
+                )
+                false
+            }
+            if (!result) {
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "EXPORT_AUDIO_IO_FAILURE",
+                    message = "Output stream could not be written for $sourcePath",
+                    component = "AudioExportManager"
+                )
+            }
             withContext(Dispatchers.Main) {
                 _exportInProgress.value = false
                 _exportProgressText.value = null
@@ -481,7 +553,20 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             _exportInProgress.value = true
             _exportProgressText.value = "Exporting CSV log..."
-            val result = AudioExportManager.exportCsvToUri(context, events, targetUri)
+            val result = try {
+                AudioExportManager.exportCsvToUri(context, events, targetUri)
+            } catch (e: Exception) {
+                Log.e("SnoreVM", "CSV export failed", e)
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "EXPORT_CSV_ERROR",
+                    message = "Failed to write CSV export: ${e.message}",
+                    throwable = e,
+                    component = "AudioExportManager",
+                    additionalDiagnostics = mapOf("EventCount" to events.size.toString())
+                )
+                false
+            }
             withContext(Dispatchers.Main) {
                 _exportInProgress.value = false
                 _exportProgressText.value = null
@@ -504,16 +589,35 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             _exportInProgress.value = true
             _exportProgressText.value = "Preparing export package (0/${events.size})..."
             
-            val summary = AudioExportManager.exportZipArchiveToUri(
-                context = context,
-                events = events,
-                destinationUri = targetUri,
-                includeCsv = includeCsv,
-                includeAudio = includeAudio,
-                onProgress = { current, total ->
-                    _exportProgressText.value = "Exporting recording $current of $total..."
-                }
-            )
+            val summary = try {
+                AudioExportManager.exportZipArchiveToUri(
+                    context = context,
+                    events = events,
+                    destinationUri = targetUri,
+                    includeCsv = includeCsv,
+                    includeAudio = includeAudio,
+                    onProgress = { current, total ->
+                        _exportProgressText.value = "Exporting recording $current of $total..."
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e("SnoreVM", "ZIP export failed", e)
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "EXPORT_ZIP_ERROR",
+                    message = "Failed to create ZIP export archive: ${e.message}",
+                    throwable = e,
+                    component = "AudioExportManager",
+                    additionalDiagnostics = mapOf("EventCount" to events.size.toString())
+                )
+                ExportSummary(
+                    success = false,
+                    exportedAudioCount = 0,
+                    missingAudioCount = 0,
+                    totalEventsCount = events.size,
+                    errorMessage = e.message ?: "Failed to create ZIP package"
+                )
+            }
 
             withContext(Dispatchers.Main) {
                 _exportInProgress.value = false
@@ -540,6 +644,13 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             Intent.createChooser(shareIntent, "Share Snoring Log CSV")
         } catch (e: Exception) {
             Log.e("SnoreVM", "Error creating CSV share intent", e)
+            ErrorLogger.log(
+                context = context,
+                errorType = "SHARE_CSV_ERROR",
+                message = "Failed to generate CSV share payload: ${e.message}",
+                throwable = e,
+                component = "AudioExportManager"
+            )
             null
         }
     }

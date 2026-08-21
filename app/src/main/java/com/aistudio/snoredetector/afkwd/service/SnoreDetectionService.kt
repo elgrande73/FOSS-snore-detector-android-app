@@ -24,6 +24,7 @@ import com.aistudio.snoredetector.afkwd.MainActivity
 import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
+import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
@@ -119,7 +120,7 @@ class SnoreDetectionService : Service() {
         
         // Initialize local Room repository
         val database = AppDatabase.getDatabase(applicationContext)
-        repository = SnoreRepository(database.snoreDao())
+        repository = SnoreRepository(database.snoreDao(), database.errorLogDao())
 
         // Acquire WakeLock to hold CPU running continuously overnight
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -241,7 +242,18 @@ class SnoreDetectionService : Service() {
 
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
-                _serviceError.value = "Hardware microphonic recording not supported"
+                val errorStr = "Hardware microphonic recording not supported"
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_BUFFER_ERROR",
+                    message = errorStr,
+                    component = "AudioRecord",
+                    additionalDiagnostics = mapOf(
+                        "SampleRate" to sampleRate.toString(),
+                        "MinBufferSize" to minBufferSize.toString()
+                    )
+                )
                 _isServiceRunning.value = false
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
                 stopSelf()
@@ -261,13 +273,29 @@ class SnoreDetectionService : Service() {
                     finalBufferSize
                 )
             } catch (e: SecurityException) {
-                _serviceError.value = "Microphone record audio permissions not granted"
+                val errorStr = "Microphone record audio permissions not granted"
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "PERMISSION_DENIED",
+                    message = errorStr,
+                    throwable = e,
+                    component = "Service"
+                )
                 _isServiceRunning.value = false
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
                 stopSelf()
                 return@launch
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize AudioRecord with audioSource=$audioSource", e)
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_RECORD_INIT_ERROR",
+                    message = "Primary AudioRecord initialization failed with source $audioSource: ${e.message}",
+                    throwable = e,
+                    component = "AudioRecord",
+                    additionalDiagnostics = mapOf("AudioSource" to audioSource.toString())
+                )
                 // Fallback to standard MIC audio source if VOICE_RECOGNITION initialization fails
                 if (audioSource != MediaRecorder.AudioSource.MIC) {
                     try {
@@ -280,12 +308,30 @@ class SnoreDetectionService : Service() {
                         )
                     } catch (e2: Exception) {
                         Log.e(TAG, "Failed fallback AudioRecord initialization", e2)
+                        ErrorLogger.log(
+                            context = applicationContext,
+                            errorType = "AUDIO_RECORD_FALLBACK_ERROR",
+                            message = "Fallback AudioRecord initialization with MIC source failed: ${e2.message}",
+                            throwable = e2,
+                            component = "AudioRecord"
+                        )
                     }
                 }
             }
 
             if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
-                _serviceError.value = "Failed to initialize microphone hardware. Device might be busy."
+                val errorStr = "Failed to initialize microphone hardware. Device might be busy."
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_HARDWARE_BUSY",
+                    message = errorStr,
+                    component = "AudioRecord",
+                    additionalDiagnostics = mapOf(
+                        "ConfiguredInput" to _configuredInputDeviceName.value,
+                        "RecordState" to (record?.state?.toString() ?: "null")
+                    )
+                )
                 try { record?.release() } catch (_: Exception) {}
                 _isServiceRunning.value = false
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
@@ -338,7 +384,15 @@ class SnoreDetectionService : Service() {
             try {
                 record.startRecording()
             } catch (e: Exception) {
-                _serviceError.value = "Microphone is being locked by another application."
+                val errorStr = "Microphone is being locked by another application."
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_LOCK_ERROR",
+                    message = errorStr,
+                    throwable = e,
+                    component = "AudioRecord"
+                )
                 try { record.release() } catch (_: Exception) {}
                 audioRecord = null
                 _isServiceRunning.value = false
@@ -550,6 +604,14 @@ class SnoreDetectionService : Service() {
                                                 savedAudioPath = clipFile.absolutePath
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "WAV write failed", e)
+                                                ErrorLogger.log(
+                                                    context = applicationContext,
+                                                    errorType = "AUDIO_CLIP_SAVE_ERROR",
+                                                    message = "Failed to save snore audio clip: ${e.message}",
+                                                    throwable = e,
+                                                    component = "WavWriter",
+                                                    additionalDiagnostics = mapOf("ClipStartTime" to snoreStartTime.toString())
+                                                )
                                             }
                                         }
 
@@ -603,6 +665,14 @@ class SnoreDetectionService : Service() {
                                 savedAudioPath = clipFile.absolutePath
                             } catch (e: Exception) {
                                 Log.e(TAG, "WAV write failed", e)
+                                ErrorLogger.log(
+                                    context = applicationContext,
+                                    errorType = "AUDIO_CLIP_SAVE_ERROR",
+                                    message = "Failed to save final snore audio clip: ${e.message}",
+                                    throwable = e,
+                                    component = "WavWriter",
+                                    additionalDiagnostics = mapOf("ClipStartTime" to snoreStartTime.toString())
+                                )
                             }
                         }
 
