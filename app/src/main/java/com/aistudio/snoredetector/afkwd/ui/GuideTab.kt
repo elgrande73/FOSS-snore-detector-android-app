@@ -203,6 +203,20 @@ fun GuideTab() {
                     HighlightBox(
                         text = "You do not need to place the phone directly under your pillow. Covering the microphone can interfere with recording.\n\nFor meaningful comparisons, use the same phone and approximately the same setup whenever possible."
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Bluetooth Sleep Masks & External Microphones:",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "If you wear a Bluetooth sleep mask with a built-in microphone, select it under Settings -> Audio Input Source. Snore Detector captures the mask's microphone without interrupting simultaneous Bluetooth media playback (such as bedtime audiobooks, podcasts, or music) or device hardware buttons.",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -302,6 +316,7 @@ fun GuideTab() {
                     BulletPoint("You did not snore that night")
                     BulletPoint("The phone was too far away")
                     BulletPoint("The microphone was obstructed")
+                    BulletPoint("The selected audio input device was disconnected or unselected")
                     BulletPoint("Background noise affected detection")
                     BulletPoint("The detection threshold was too high")
                     BulletPoint("The selected algorithms were not suitable for the recording")

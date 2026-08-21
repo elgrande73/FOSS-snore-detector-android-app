@@ -3,12 +3,19 @@ package com.aistudio.snoredetector.afkwd.viewmodel
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
+import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
@@ -38,6 +45,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application.applicationContext
     private val prefs = context.getSharedPreferences("snore_detector_preferences", Context.MODE_PRIVATE)
     private val repository: SnoreRepository
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     // Central state synchronization of DB SnoreEvents
     val hLogs: StateFlow<List<SnoreEvent>>
@@ -50,6 +58,29 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     // Multi-Selection state for selective export
     private val _isMultiSelectMode = MutableStateFlow(false)
     val isMultiSelectMode = _isMultiSelectMode.asStateFlow()
+
+    // Audio Input Device selection state
+    private val _availableInputDevices = MutableStateFlow<List<AudioInputDevice>>(listOf(AudioInputDevice.PHONE_MIC))
+    val availableInputDevices = _availableInputDevices.asStateFlow()
+
+    private val _selectedAudioInputId = MutableStateFlow(prefs.getInt("selectedAudioInputId", -1))
+    val selectedAudioInputId = _selectedAudioInputId.asStateFlow()
+
+    private val _selectedAudioInputName = MutableStateFlow(
+        prefs.getString("selectedAudioInputName", AudioInputDevice.PHONE_MIC.name) ?: AudioInputDevice.PHONE_MIC.name
+    )
+    val selectedAudioInputName = _selectedAudioInputName.asStateFlow()
+
+    private val audioDeviceCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                refreshAvailableInputDevices()
+            }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                refreshAvailableInputDevices()
+            }
+        }
+    } else null
 
     private val _selectedEventIds = MutableStateFlow<Set<Int>>(emptySet())
     val selectedEventIds = _selectedEventIds.asStateFlow()
@@ -130,6 +161,18 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+        // Enumerate currently available audio input sources
+        refreshAvailableInputDevices()
+
+        // Register dynamic hardware audio device callback for connect / disconnect events
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            try {
+                audioManager?.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
+            } catch (e: Exception) {
+                Log.w("SnoreVM", "Failed to register audio device callback: ${e.message}")
+            }
+        }
+
         // Load cached last-measurement points from disk if any
         loadLastSavedTimelineOffline()
 
@@ -161,6 +204,8 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         val intent = Intent(context, SnoreDetectionService::class.java).apply {
             putExtra("saveAudioClips", _saveAudioClips.value)
             putExtra("notifyOnSnore", _notifyOnSnore.value)
+            putExtra("audioInputId", _selectedAudioInputId.value)
+            putExtra("audioInputName", _selectedAudioInputName.value)
             putExtra("useRms", _useRms.value)
             putExtra("rmsDbThreshold", _rmsDbThreshold.value)
             putExtra("useZcr", _useZcr.value)
@@ -182,6 +227,27 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun stopServiceDetection() {
         val intent = Intent(context, SnoreDetectionService::class.java)
         context.stopService(intent)
+    }
+
+    // --- AUDIO INPUT DEVICE METHODS ---
+
+    fun refreshAvailableInputDevices() {
+        val devices = AudioInputManager.getAvailableInputDevices(context)
+        _availableInputDevices.value = devices
+    }
+
+    fun updateSelectedAudioInput(device: AudioInputDevice) {
+        _selectedAudioInputId.value = device.id
+        _selectedAudioInputName.value = device.name
+        prefs.edit()
+            .putInt("selectedAudioInputId", device.id)
+            .putString("selectedAudioInputName", device.name)
+            .apply()
+
+        // If background service is currently active, send updated intent to switch preferred device live
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     // --- CONFIG UPDATE METHODS ---
@@ -271,6 +337,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateMinDurationSeconds(defaultConfig.minDurationSeconds)
         updateSaveAudioClips(true)
         updateNotifyOnSnore(false)
+        updateSelectedAudioInput(AudioInputDevice.DEFAULT_DEVICE)
         updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
         updateDynamicColor(true)
     }
@@ -521,6 +588,13 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         stopAudio()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioDeviceCallback != null) {
+            try {
+                audioManager?.unregisterAudioDeviceCallback(audioDeviceCallback)
+            } catch (e: Exception) {
+                Log.w("SnoreVM", "Failed to unregister audio device callback: ${e.message}")
+            }
+        }
         super.onCleared()
     }
 }

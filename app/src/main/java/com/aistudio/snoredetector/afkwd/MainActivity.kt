@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
@@ -71,6 +72,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -100,6 +103,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
+import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
@@ -154,6 +159,17 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                var hasBluetoothPermission by remember {
+                    mutableStateOf(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.BLUETOOTH_CONNECT
+                            ) == PackageManager.PERMISSION_GRANTED
+                        } else true
+                    )
+                }
+
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
                 ) { permissions ->
@@ -161,6 +177,10 @@ class MainActivity : ComponentActivity() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         hasNotificationPermission = permissions[Manifest.permission.POST_NOTIFICATIONS] == true
                     }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        hasBluetoothPermission = permissions[Manifest.permission.BLUETOOTH_CONNECT] == true
+                    }
+                    viewModel.refreshAvailableInputDevices()
                 }
 
                 // Auto request on launch
@@ -169,6 +189,9 @@ class MainActivity : ComponentActivity() {
                     if (!hasMicPermission) list.add(Manifest.permission.RECORD_AUDIO)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
                         list.add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
+                        list.add(Manifest.permission.BLUETOOTH_CONNECT)
                     }
                     if (list.isNotEmpty()) {
                         permissionLauncher.launch(list.toTypedArray())
@@ -308,6 +331,9 @@ fun DashboardTab(viewModel: SnoreViewModel) {
     val isCurrentlySnoring by SnoreDetectionService.isCurrentlySnoring.collectAsState()
     val timelineData by viewModel.timelineDisplayState.collectAsState()
     val errorMsg by SnoreDetectionService.serviceError.collectAsState()
+    val configuredInputDeviceName by SnoreDetectionService.configuredInputDeviceName.collectAsState()
+    val activeInputDeviceName by SnoreDetectionService.activeInputDeviceName.collectAsState()
+    val selectedAudioInputName by viewModel.selectedAudioInputName.collectAsState()
     
     val sessionStartTime by SnoreDetectionService.sessionStartTime.collectAsState()
     val sessionEventCount by SnoreDetectionService.sessionEventCount.collectAsState()
@@ -392,7 +418,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                                 .background(
                                     if (isRunning) {
                                         if (isCurrentlySnoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                    } else MaterialTheme.colorScheme.onSurfaceVariant
+                                     } else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -495,6 +521,117 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+        }
+
+        // Audio Input Routing Information (at very bottom below Session Profile)
+        item(key = "dashboard_audio_input_routing_card") {
+            val configuredDisplay = if (isRunning) {
+                configuredInputDeviceName
+            } else {
+                if (selectedAudioInputName.isNotBlank()) selectedAudioInputName else "Phone microphone"
+            }
+            val activeDisplay = if (isRunning) {
+                activeInputDeviceName
+            } else {
+                configuredDisplay
+            }
+            val isFallback = isRunning && !configuredDisplay.equals(activeDisplay, ignoreCase = true)
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, if (isFallback) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("dashboard_audio_input_routing_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Audio Input Routing",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 0.5.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        !isRunning -> MaterialTheme.colorScheme.surface
+                                        isFallback -> MaterialTheme.colorScheme.errorContainer
+                                        else -> MaterialTheme.colorScheme.primaryContainer
+                                    }
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    !isRunning -> "Ready"
+                                    isFallback -> "Fallback Active"
+                                    else -> "Direct Route Active"
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    !isRunning -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    isFallback -> MaterialTheme.colorScheme.onErrorContainer
+                                    else -> MaterialTheme.colorScheme.onPrimaryContainer
+                                }
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Configured input:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = configuredDisplay,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Active input:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = activeDisplay,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isFallback) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1722,6 +1859,12 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
     val notifyOnSnore by viewModel.notifyOnSnore.collectAsState()
 
+    val availableInputDevices by viewModel.availableInputDevices.collectAsState()
+    val selectedAudioInputId by viewModel.selectedAudioInputId.collectAsState()
+    val selectedAudioInputName by viewModel.selectedAudioInputName.collectAsState()
+    val isRunning by SnoreDetectionService.isServiceRunning.collectAsState()
+    val activeInputDeviceName by SnoreDetectionService.activeInputDeviceName.collectAsState()
+
     val themeMode by viewModel.themeMode.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
 
@@ -1826,7 +1969,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Derive color palette from your Android wallpaper and system palette.",
+                                    text = "Derive color palette from your Android wallpaper and system palette. (Default: On)",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -1841,6 +1984,220 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                                 modifier = Modifier.testTag("dynamic_color_switch")
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // Audio Input Source Microphone Selection Card (Bluetooth Sleep Masks / External Microphones)
+        item(key = "settings_audio_input_source_card") {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().testTag("audio_input_source_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Audio Input Source (Microphone)",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Target: ${if (selectedAudioInputName.isBlank()) "Default Phone Microphone" else selectedAudioInputName}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                viewModel.refreshAvailableInputDevices()
+                                Toast.makeText(context, "Scanning audio devices...", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.testTag("refresh_audio_inputs_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Scan for connected audio devices",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Choose which microphone hardware captures audio for snoring detection. Supports Bluetooth sleep masks and wireless headsets without interrupting Bluetooth media playback (audiobooks, podcasts, music) or headphone buttons.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                    )
+
+                    // Active Service Routing status
+                    if (isRunning) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary)
+                                )
+                                Text(
+                                    text = "Live Active Input: $activeInputDeviceName",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Disconnected device fallback notice
+                    val isSelectedDeviceDisconnected = selectedAudioInputId != -1 &&
+                        availableInputDevices.none { it.id == selectedAudioInputId }
+                    if (isSelectedDeviceDisconnected) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Selected device \"$selectedAudioInputName\" is not currently connected. System is falling back to the default Phone Microphone automatically.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // List of available audio input devices
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                    ) {
+                        availableInputDevices.forEachIndexed { index, device ->
+                            val isSelected = (selectedAudioInputId == device.id) ||
+                                (selectedAudioInputId == -1 && device.id == -1)
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.updateSelectedAudioInput(device)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    .testTag("audio_input_device_${device.id}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { viewModel.updateSelectedAudioInput(device) },
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                    Column {
+                                        Text(
+                                            text = device.name,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = device.typeDescription,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            when {
+                                                device.isBluetooth -> MaterialTheme.colorScheme.primaryContainer
+                                                device.isUsb -> MaterialTheme.colorScheme.tertiaryContainer
+                                                device.isWired -> MaterialTheme.colorScheme.secondaryContainer
+                                                else -> MaterialTheme.colorScheme.surfaceVariant
+                                            }
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = when {
+                                            device.isBluetooth -> "Bluetooth"
+                                            device.isUsb -> "USB"
+                                            device.isWired -> "Wired"
+                                            else -> "Built-in"
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when {
+                                            device.isBluetooth -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            device.isUsb -> MaterialTheme.colorScheme.onTertiaryContainer
+                                            device.isWired -> MaterialTheme.colorScheme.onSecondaryContainer
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+
+                            if (index < availableInputDevices.size - 1) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    thickness = 0.5.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant
+                                )
+                            }
+                        }
+                    }
+
+                    if (availableInputDevices.size == 1) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "💡 Tip: To use a Bluetooth sleep mask or headset mic, connect the device in Android Settings -> Bluetooth, then tap the Refresh button above.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -1876,7 +2233,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateRmsDbThreshold(it) },
                 valueRange = 40.0f..85.0f,
                 labelFormatter = { "${it.toInt()} dB" },
-                defaultValueLabel = "55 dB",
+                defaultValueLabel = "55 dB (Enabled)",
                 testTag = "rms_method"
             )
         }
@@ -1894,7 +2251,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateZcrThreshold(it) },
                 valueRange = 0.05f..0.35f,
                 labelFormatter = { String.format("%.3f", it) },
-                defaultValueLabel = "0.150",
+                defaultValueLabel = "0.150 (Enabled)",
                 testTag = "zcr_method"
             )
         }
@@ -1912,7 +2269,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateBandEnergyThreshold(it) },
                 valueRange = 0.005f..0.04f,
                 labelFormatter = { String.format("%.4f", it) },
-                defaultValueLabel = "0.0150",
+                defaultValueLabel = "0.0150 (Enabled)",
                 testTag = "band_method"
             )
         }
@@ -1930,7 +2287,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 onValueChange = { viewModel.updateLowFreqRatioThreshold(it) },
                 valueRange = 0.40f..0.90f,
                 labelFormatter = { "${(it * 100).toInt()}%" },
-                defaultValueLabel = "65%",
+                defaultValueLabel = "65% (Enabled)",
                 testTag = "low_freq_method"
             )
         }
@@ -2058,12 +2415,22 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Save Audio Recordings (.WAV)",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Save Audio Recordings (.WAV)",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "(Default: Enabled)",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Text(
                             text = "Extract and persist short audio clippings of detected snoring incidents locally to play back in history logs.",
                             fontSize = 11.sp,
@@ -2162,7 +2529,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         )
                     }
                     Text(
-                        text = "Restore all 4 DSP acoustic filters, threshold parameters, minimum duration condition (1.0s), audio recording preference, and appearance settings back to their source-of-truth defaults.",
+                        text = "Restore all 4 DSP acoustic filters, threshold parameters, minimum duration condition (1.0s), audio recording preference, microphone input source selection, and appearance settings back to their source-of-truth defaults.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2233,7 +2600,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             },
             text = {
                 Text(
-                    text = "This will reset all detection parameters, acoustic thresholds, audio recording preferences, and theming options to their original default values. Your recorded history logs will not be affected.",
+                    text = "This will reset all detection parameters, acoustic thresholds, audio recording preferences, microphone input selection, and theming options to their original default values. Your recorded history logs will not be affected.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

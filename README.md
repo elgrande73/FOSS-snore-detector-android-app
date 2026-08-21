@@ -17,6 +17,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
   
 * **Real-Time Snoring Alerts & Smartwatch Vibration**
   Optional immediate Android notification when a snoring incident is confirmed, enabling vibration on connected smartwatches and fitness bands via Gadgetbridge or notification sync tools.
+  
+* **Audio Input Selection** 
+  Choose the microphone used for detection, including Bluetooth, USB, or the built-in mic, with automatic device discovery and fallback. Bluetooth input is designed to work alongside media playback and controls.
 
 * **100% On-Device & Private**
   Zero external network calls or tracking analytics. Your audio and sleep data never leave your device.
