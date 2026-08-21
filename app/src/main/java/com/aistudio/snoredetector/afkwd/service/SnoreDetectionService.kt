@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
@@ -414,54 +415,55 @@ class SnoreDetectionService : Service() {
 
                     if (!isRecording.get() || !isActive) break
 
-                    if (readResult > 0) {
-                        // Inspect PCM samples for non-zero audio content
-                        var maxAbsSample = 0
-                        var hasNonZeroAudio = false
-                        for (i in 0 until readResult) {
-                            val abs = kotlin.math.abs(audioBuffer[i].toInt())
-                            if (abs > maxAbsSample) maxAbsSample = abs
-                            if (audioBuffer[i].toInt() != 0) hasNonZeroAudio = true
-                        }
+                    if (readResult <= 0) {
+                        delay(10)
+                        continue
+                    }
 
-                        if (hasNonZeroAudio) {
-                            consecutiveZeroFrames = 0
-                        } else {
-                            consecutiveZeroFrames++
-                        }
+                    // Inspect PCM samples for non-zero audio content
+                    var maxAbsSample = 0
+                    var hasNonZeroAudio = false
+                    for (i in 0 until readResult) {
+                        val abs = kotlin.math.abs(audioBuffer[i].toInt())
+                        if (abs > maxAbsSample) maxAbsSample = abs
+                        if (audioBuffer[i].toInt() != 0) hasNonZeroAudio = true
+                    }
 
-                        val frameSamples = audioBuffer.copyOf(readResult)
-                        
-                        // Run signal processing algorithms
-                        val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
+                    if (hasNonZeroAudio) {
+                        consecutiveZeroFrames = 0
+                    } else {
+                        consecutiveZeroFrames++
+                    }
 
-                        // Post real-time analytics to dashboard flow
-                        _liveAnalysis.value = result
+                    val frameSamples = audioBuffer.copyOf(readResult)
+                    
+                    // Run signal processing algorithms
+                    val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
 
-                        // Diagnostic logging every ~5 seconds (~75 frames)
-                        diagnosticFrameCount++
-                        if (diagnosticFrameCount % 78 == 0) {
-                            val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) record.routedDevice else null
-                            val routedName = routed?.productName?.takeIf { it.isNotBlank() }?.toString()
-                                ?: routed?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                                ?: _activeInputDeviceName.value
-                            Log.i(
-                                TAG,
-                                """
-                                |--- [Audio Stream Health Diagnostics] ---
-                                | Configured: ${_configuredInputDeviceName.value}
-                                | Active Routed: $routedName (type=${routed?.type ?: "N/A"})
-                                | Audio Source: $audioSource, Samples Read: $readResult
-                                | Max Amplitude: $maxAbsSample, RMS dB: ${String.format(Locale.US, "%.1f", result.db)}
-                                | Non-Zero Audio: $hasNonZeroAudio (Zero streak: $consecutiveZeroFrames frames)
-                                | Snoring State: isSnoring=${result.isSnoring}
-                                |------------------------------------------
-                                """.trimMargin()
-                            )
-                            if (!hasNonZeroAudio && isBluetoothTarget && consecutiveZeroFrames >= 75) {
-                                Log.w(TAG, "WARNING: Bluetooth microphone has produced 0 samples for >5 seconds. Verifying Bluetooth link.")
-                            }
-                        }
+                    // Post real-time analytics to dashboard flow
+                    _liveAnalysis.value = result
+
+                    // Diagnostic logging every ~5 seconds (~75 frames)
+                    diagnosticFrameCount++
+                    if (diagnosticFrameCount % 78 == 0) {
+                        val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) record.routedDevice else null
+                        val routedName = routed?.productName?.takeIf { it.isNotBlank() }?.toString()
+                            ?: routed?.let { AudioInputManager.getDeviceTypeName(it.type) }
+                            ?: _activeInputDeviceName.value
+                        Log.i(
+                            TAG,
+                            """
+                            |--- [Audio Stream Health Diagnostics] ---
+                            | Configured: ${_configuredInputDeviceName.value}
+                            | Active Routed: $routedName (type=${routed?.type ?: "N/A"})
+                            | Audio Source: $audioSource, Samples Read: $readResult
+                            | Max Amplitude: $maxAbsSample, RMS dB: ${String.format(Locale.US, "%.1f", result.db)}
+                            | Non-Zero Audio: $hasNonZeroAudio (Zero streak: $consecutiveZeroFrames frames)
+                            | Snoring State: isSnoring=${result.isSnoring}
+                            |------------------------------------------
+                            """.trimMargin()
+                        )
+                    }
 
                         // Aggregate timelines mapping sample dB
                         val currentMillis = System.currentTimeMillis()
@@ -581,7 +583,6 @@ class SnoreDetectionService : Service() {
                                 }
                             }
                         }
-                    }
                 }
             } finally {
                 if (isSnoringActive && snoreBlocksCount > 0) {
@@ -640,15 +641,25 @@ class SnoreDetectionService : Service() {
         }
     }
 
-    private fun stopAudioCapture() {
-        if (!isRecording.getAndSet(false)) return
+    private fun stopAudioCaptureInternal() {
         try {
             audioRecord?.stop()
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping AudioRecord", e)
+            Log.w(TAG, "Error stopping AudioRecord in internal stop", e)
         }
+        try {
+            audioRecord?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AudioRecord in internal stop", e)
+        }
+        audioRecord = null
         recordingJob?.cancel()
         recordingJob = null
+    }
+
+    private fun stopAudioCapture() {
+        if (!isRecording.getAndSet(false)) return
+        stopAudioCaptureInternal()
         AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
     }
 
