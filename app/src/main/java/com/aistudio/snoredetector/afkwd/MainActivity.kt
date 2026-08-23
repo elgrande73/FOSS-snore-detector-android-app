@@ -343,6 +343,8 @@ fun DashboardTab(viewModel: SnoreViewModel) {
     
     val sessionStartTime by SnoreDetectionService.sessionStartTime.collectAsState()
     val sessionEventCount by SnoreDetectionService.sessionEventCount.collectAsState()
+    val isDetectionSuspendedForMedia by SnoreDetectionService.isDetectionSuspendedForMedia.collectAsState()
+    val isMediaPlaying by SnoreDetectionService.isMediaPlaying.collectAsState()
     
     val rmsDbThreshold by viewModel.rmsDbThreshold.collectAsState()
     val zcrThreshold by viewModel.zcrThreshold.collectAsState()
@@ -411,7 +413,13 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                         .clip(RoundedCornerShape(32.dp))
                         .background(
                             if (isRunning) {
-                                if (isCurrentlySnoring) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+                                if (isCurrentlySnoring) {
+                                    MaterialTheme.colorScheme.errorContainer
+                                } else if (isDetectionSuspendedForMedia) {
+                                    MaterialTheme.colorScheme.tertiaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                }
                             } else MaterialTheme.colorScheme.surfaceVariant
                         )
                         .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -423,19 +431,37 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                                 .clip(CircleShape)
                                 .background(
                                     if (isRunning) {
-                                        if (isCurrentlySnoring) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                        if (isCurrentlySnoring) {
+                                            MaterialTheme.colorScheme.error
+                                        } else if (isDetectionSuspendedForMedia) {
+                                            MaterialTheme.colorScheme.tertiary
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        }
                                      } else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (isRunning) {
-                                if (isCurrentlySnoring) "SNORE!" else "MONITORING"
+                                if (isCurrentlySnoring) {
+                                    "SNORE!"
+                                } else if (isDetectionSuspendedForMedia) {
+                                    "MEDIA STANDBY"
+                                } else {
+                                    "MONITORING"
+                                }
                             } else "OFF",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isRunning) {
-                                if (isCurrentlySnoring) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                if (isCurrentlySnoring) {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                } else if (isDetectionSuspendedForMedia) {
+                                    MaterialTheme.colorScheme.onTertiaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                }
                             } else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -478,6 +504,44 @@ fun DashboardTab(viewModel: SnoreViewModel) {
         if (isCurrentlySnoring) {
             item(key = "dashboard_snore_alert") {
                 ActiveSnoreAlertBanner()
+            }
+        }
+
+        // Media Playback Standby Banner when podcasts/music are playing
+        if (isRunning && isDetectionSuspendedForMedia) {
+            item(key = "dashboard_media_playback_standby") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("media_playback_standby_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Column {
+                            Text(
+                                text = "Media Playback Active — Detection Standby",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            Text(
+                                text = "Audio playback (music / podcasts) detected. Snoring triggers are suppressed to avoid false logs. Detection resumes automatically when media stops.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -2411,6 +2475,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val lowFreqRatioThreshold by viewModel.lowFreqRatioThreshold.collectAsState()
 
     val minDurationSeconds by viewModel.minDurationSeconds.collectAsState()
+    val ignoreDuringMediaPlayback by viewModel.ignoreDuringMediaPlayback.collectAsState()
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
     val notifyOnSnore by viewModel.notifyOnSnore.collectAsState()
 
@@ -2636,6 +2701,60 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                                 )
                             )
                         }
+                    }
+                }
+            }
+
+            // Media Playback Suppression toggle
+            item(key = "settings_media_playback_coexistence") {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("media_coexistence_card")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Pause Triggers During Media Playback",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "(Default: Enabled)",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = "Automatically suppress false snoring triggers while podcasts, audiobooks, or music are playing on the device (e.g. while falling asleep). Snoring detection resumes automatically the moment media stops.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                        Switch(
+                            checked = ignoreDuringMediaPlayback,
+                            onCheckedChange = { viewModel.updateIgnoreDuringMediaPlayback(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                            ),
+                            modifier = Modifier.testTag("ignore_during_media_playback_switch")
+                        )
                     }
                 }
             }

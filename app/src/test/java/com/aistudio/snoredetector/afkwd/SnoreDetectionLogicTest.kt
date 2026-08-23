@@ -23,6 +23,7 @@ class SnoreDetectionLogicTest {
         assertTrue(config.useZcr)
         assertTrue(config.useBandEnergy)
         assertTrue(config.useLowFreqRatio)
+        assertTrue(config.ignoreDuringMediaPlayback)
     }
 
     @Test

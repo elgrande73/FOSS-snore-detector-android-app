@@ -133,6 +133,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _notifyOnSnore = MutableStateFlow(prefs.getBoolean("notifyOnSnore", false))
     val notifyOnSnore = _notifyOnSnore.asStateFlow()
 
+    private val _ignoreDuringMediaPlayback = MutableStateFlow(prefs.getBoolean("ignoreDuringMediaPlayback", true))
+    val ignoreDuringMediaPlayback = _ignoreDuringMediaPlayback.asStateFlow()
+
     // Material 3 / Material You Theme Preferences
     private val savedThemeModeStr = prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
     private val _themeMode = MutableStateFlow(
@@ -231,6 +234,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             putExtra("useLowFreqRatio", _useLowFreqRatio.value)
             putExtra("lowFreqRatioThreshold", _lowFreqRatioThreshold.value)
             putExtra("minDurationSeconds", _minDurationSeconds.value)
+            putExtra("ignoreDuringMediaPlayback", _ignoreDuringMediaPlayback.value)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -353,6 +357,14 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("saveAudioClips", value).apply()
     }
 
+    fun updateIgnoreDuringMediaPlayback(value: Boolean) {
+        _ignoreDuringMediaPlayback.value = value
+        prefs.edit().putBoolean("ignoreDuringMediaPlayback", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
+    }
+
     fun updateThemeMode(mode: com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode) {
         _themeMode.value = mode
         prefs.edit().putString("themeMode", mode.name).apply()
@@ -377,6 +389,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateUseLowFreqRatio(defaultConfig.useLowFreqRatio)
         updateLowFreqRatioThreshold(defaultConfig.lowFreqRatioThreshold)
         updateMinDurationSeconds(defaultConfig.minDurationSeconds)
+        updateIgnoreDuringMediaPlayback(defaultConfig.ignoreDuringMediaPlayback)
         updateSaveAudioClips(true)
         updateNotifyOnSnore(false)
         updateSelectedAudioInput(AudioInputDevice.DEFAULT_DEVICE)

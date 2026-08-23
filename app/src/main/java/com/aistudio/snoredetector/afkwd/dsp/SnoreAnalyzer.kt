@@ -50,7 +50,10 @@ data class DetectionConfig(
     val lowFreqRatioThreshold: Float = 0.65f,   // Minimum threshold: min ratio of energy below 500Hz to total (0 to 1)
 
     // Time / Duration Condition
-    val minDurationSeconds: Float = 1.0f        // Minimum duration threshold: min continuous seconds required to log an incident
+    val minDurationSeconds: Float = 1.0f,       // Minimum duration threshold: min continuous seconds required to log an incident
+
+    // Playback Co-existence Policy
+    val ignoreDuringMediaPlayback: Boolean = true // Suppress false snoring triggers during active media playback
 )
 
 /**

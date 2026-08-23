@@ -14,6 +14,8 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -23,6 +25,7 @@ import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.MainActivity
 import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
+import com.aistudio.snoredetector.afkwd.audio.MediaPlaybackDetector
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
@@ -55,6 +58,9 @@ class SnoreDetectionService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
 
     private var audioRecord: AudioRecord? = null
+    private var acousticEchoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var mediaPlaybackDetector: MediaPlaybackDetector? = null
     private val isRecording = AtomicBoolean(false)
     private var recordingJob: Job? = null
 
@@ -108,6 +114,12 @@ class SnoreDetectionService : Service() {
         private val _isFallbackActive = MutableStateFlow(false)
         val isFallbackActive = _isFallbackActive.asStateFlow()
 
+        private val _isMediaPlaying = MutableStateFlow(false)
+        val isMediaPlaying = _isMediaPlaying.asStateFlow()
+
+        private val _isDetectionSuspendedForMedia = MutableStateFlow(false)
+        val isDetectionSuspendedForMedia = _isDetectionSuspendedForMedia.asStateFlow()
+
         private val _serviceError = MutableStateFlow<String?>(null)
         val serviceError = _serviceError.asStateFlow()
 
@@ -137,6 +149,27 @@ class SnoreDetectionService : Service() {
         startTimeMillis = System.currentTimeMillis()
         _sessionStartTime.value = startTimeMillis
         _sessionEventCount.value = 0
+
+        // Initialize and start monitoring system media playback
+        mediaPlaybackDetector = MediaPlaybackDetector(applicationContext) { isPlaying ->
+            Log.d(TAG, "System media playback change observed: isPlaying=$isPlaying")
+        }.also { detector ->
+            detector.startMonitoring()
+            serviceScope.launch {
+                detector.isMediaPlaying.collect { isPlaying ->
+                    _isMediaPlaying.value = isPlaying
+                    val isSuspended = isPlaying && currentConfig.ignoreDuringMediaPlayback
+                    _isDetectionSuspendedForMedia.value = isSuspended
+                    if (isRecording.get()) {
+                        if (isSuspended) {
+                            updateNotification("Media playback active — Detection on standby")
+                        } else if (!_isCurrentlySnoring.value) {
+                            updateNotification("Monitoring bedroom acoustics dynamically...")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -164,7 +197,8 @@ class SnoreDetectionService : Service() {
                 zcrThreshold = it.getFloatExtra("zcrThreshold", 0.15f),
                 bandEnergyThreshold = it.getFloatExtra("bandEnergyThreshold", 0.015f),
                 lowFreqRatioThreshold = it.getFloatExtra("lowFreqRatioThreshold", 0.65f),
-                minDurationSeconds = it.getFloatExtra("minDurationSeconds", 1.0f)
+                minDurationSeconds = it.getFloatExtra("minDurationSeconds", 1.0f),
+                ignoreDuringMediaPlayback = it.getBooleanExtra("ignoreDuringMediaPlayback", true)
             )
 
             // If audio capture is already running and the selected device configuration changed, restart capture with new hardware routing
@@ -236,12 +270,9 @@ class SnoreDetectionService : Service() {
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
             }
 
-            // Select appropriate AudioSource: VOICE_RECOGNITION for Bluetooth SCO microphones, MIC for built-in/USB
-            val audioSource = if (isBluetoothTarget) {
-                MediaRecorder.AudioSource.VOICE_RECOGNITION
-            } else {
-                MediaRecorder.AudioSource.MIC
-            }
+            // Select AudioSource: VOICE_RECOGNITION configures audio HAL with voice tuning and echo reference.
+            // Falls back to MIC if unsupported by custom hardware.
+            val audioSource = MediaRecorder.AudioSource.VOICE_RECOGNITION
 
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
@@ -343,6 +374,9 @@ class SnoreDetectionService : Service() {
             }
 
             audioRecord = record
+
+            // Attach AcousticEchoCanceler and NoiseSuppressor hardware effects to prevent USB/speaker loopback bleed
+            attachAudioEffects(record.audioSessionId)
 
             // Apply user's selected input device routing
             applyPreferredAudioDevice(record, selectedAudioInputId, selectedAudioInputName, targetDeviceInfo)
@@ -454,6 +488,7 @@ class SnoreDetectionService : Service() {
             // Diagnostic logging counters for non-zero audio verification
             var diagnosticFrameCount = 0
             var consecutiveZeroFrames = 0
+            var lastPlaybackPollMillis = 0L
 
             try {
                 while (isActive && isRecording.get()) {
@@ -469,6 +504,17 @@ class SnoreDetectionService : Service() {
                     if (readResult <= 0) {
                         delay(10)
                         continue
+                    }
+
+                    val currentMillis = System.currentTimeMillis()
+
+                    // If media is currently marked as playing, periodically poll system playback state (every ~350ms)
+                    // This provides a fallback to ensure immediate resumption if a player sleep timer or background stream finished
+                    if (currentConfig.ignoreDuringMediaPlayback && _isMediaPlaying.value) {
+                        if (currentMillis - lastPlaybackPollMillis >= 350L) {
+                            lastPlaybackPollMillis = currentMillis
+                            mediaPlaybackDetector?.checkCurrentPlaybackState()
+                        }
                     }
 
                     // Inspect PCM samples for non-zero audio content
@@ -491,8 +537,25 @@ class SnoreDetectionService : Service() {
                     // Run signal processing algorithms
                     val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
 
+                    // Evaluate active media playback coexistence
+                    val isMediaActive = currentConfig.ignoreDuringMediaPlayback && _isMediaPlaying.value
+                    _isDetectionSuspendedForMedia.value = isMediaActive
+
+                    // If media playback is active, prevent snoring triggers while keeping live decibel metering active
+                    val effectiveIsSnoring = if (isMediaActive) false else result.isSnoring
+                    val effectiveResult = if (isMediaActive) result.copy(isSnoring = false) else result
+
                     // Post real-time analytics to dashboard flow
-                    _liveAnalysis.value = result
+                    _liveAnalysis.value = effectiveResult
+
+                    // If media suddenly became active while in the middle of accumulating a snore, safely reset state
+                    if (isMediaActive && isSnoringActive) {
+                        isSnoringActive = false
+                        hasNotifiedForCurrentEvent = false
+                        snoreAudioBuffer.clear()
+                        _isCurrentlySnoring.value = false
+                        updateNotification("Media playback active — Detection on standby")
+                    }
 
                     // Diagnostic logging every ~5 seconds (~75 frames)
                     diagnosticFrameCount++
@@ -510,30 +573,31 @@ class SnoreDetectionService : Service() {
                             | Audio Source: $audioSource, Samples Read: $readResult
                             | Max Amplitude: $maxAbsSample, RMS dB: ${String.format(Locale.US, "%.1f", result.db)}
                             | Non-Zero Audio: $hasNonZeroAudio (Zero streak: $consecutiveZeroFrames frames)
-                            | Snoring State: isSnoring=${result.isSnoring}
+                            | Media Playing: ${_isMediaPlaying.value} (Detection Suspended: $isMediaActive)
+                            | Snoring State: effectiveIsSnoring=$effectiveIsSnoring (raw=${result.isSnoring})
+                            | AEC Active: ${acousticEchoCanceler?.enabled ?: false}, NS Active: ${noiseSuppressor?.enabled ?: false}
                             |------------------------------------------
                             """.trimMargin()
                         )
                     }
 
-                        // Aggregate timelines mapping sample dB
-                        val currentMillis = System.currentTimeMillis()
-                        if (currentMillis - timelineTimer >= 500L) {
-                            timelineTimer = currentMillis
-                            val point = AmplitudePoint(
-                                dbValue = result.db,
-                                isSnore = result.isSnoring,
-                                timestamp = currentMillis
-                            )
-                            accumulatedTimelinePoints.add(point)
-                            if (accumulatedTimelinePoints.size > 25000) {
-                                accumulatedTimelinePoints.removeAt(0)
-                            }
-                            _currentSessionData.value = ArrayList(accumulatedTimelinePoints)
+                    // Aggregate timelines mapping sample dB
+                    if (currentMillis - timelineTimer >= 500L) {
+                        timelineTimer = currentMillis
+                        val point = AmplitudePoint(
+                            dbValue = result.db,
+                            isSnore = effectiveIsSnoring,
+                            timestamp = currentMillis
+                        )
+                        accumulatedTimelinePoints.add(point)
+                        if (accumulatedTimelinePoints.size > 25000) {
+                            accumulatedTimelinePoints.removeAt(0)
                         }
+                        _currentSessionData.value = ArrayList(accumulatedTimelinePoints)
+                    }
 
-                        // --- SNORE DETECTOR DEBOUNCE STATE MACHINE ---
-                        if (result.isSnoring) {
+                    // --- SNORE DETECTOR DEBOUNCE STATE MACHINE ---
+                    if (effectiveIsSnoring) {
                             if (!isSnoringActive) {
                                 isSnoringActive = true
                                 snoreStartTime = currentMillis
@@ -688,6 +752,7 @@ class SnoreDetectionService : Service() {
                     }
                 }
 
+                releaseAudioEffects()
                 try {
                     if (record.state == AudioRecord.STATE_INITIALIZED) {
                         record.stop()
@@ -708,7 +773,59 @@ class SnoreDetectionService : Service() {
         }
     }
 
+    private fun attachAudioEffects(audioSessionId: Int) {
+        releaseAudioEffects()
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                acousticEchoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply {
+                    enabled = true
+                }
+                Log.i(TAG, "AcousticEchoCanceler enabled on audioSessionId $audioSessionId (success=${acousticEchoCanceler?.enabled})")
+            } else {
+                Log.d(TAG, "AcousticEchoCanceler is not supported on this device/HAL")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize AcousticEchoCanceler on audioSessionId $audioSessionId: ${e.message}")
+        }
+
+        try {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply {
+                    enabled = true
+                }
+                Log.i(TAG, "NoiseSuppressor enabled on audioSessionId $audioSessionId (success=${noiseSuppressor?.enabled})")
+            } else {
+                Log.d(TAG, "NoiseSuppressor is not supported on this device/HAL")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize NoiseSuppressor on audioSessionId $audioSessionId: ${e.message}")
+        }
+    }
+
+    private fun releaseAudioEffects() {
+        try {
+            acousticEchoCanceler?.apply {
+                enabled = false
+                release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing AcousticEchoCanceler: ${e.message}")
+        }
+        acousticEchoCanceler = null
+
+        try {
+            noiseSuppressor?.apply {
+                enabled = false
+                release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing NoiseSuppressor: ${e.message}")
+        }
+        noiseSuppressor = null
+    }
+
     private fun stopAudioCaptureInternal() {
+        releaseAudioEffects()
         try {
             audioRecord?.stop()
         } catch (e: Exception) {
@@ -915,7 +1032,10 @@ class SnoreDetectionService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service being destroyed")
+        mediaPlaybackDetector?.stopMonitoring()
+        mediaPlaybackDetector = null
         stopAudioCapture()
+        releaseAudioEffects()
         AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -944,6 +1064,8 @@ class SnoreDetectionService : Service() {
         _liveAnalysis.value = null
         _sessionStartTime.value = 0L
         _sessionEventCount.value = 0
+        _isMediaPlaying.value = false
+        _isDetectionSuspendedForMedia.value = false
         _configuredInputDeviceName.value = AudioInputDevice.DEFAULT_DEVICE.name
         _activeInputDeviceName.value = AudioInputDevice.DEFAULT_DEVICE.name
         _isFallbackActive.value = false
