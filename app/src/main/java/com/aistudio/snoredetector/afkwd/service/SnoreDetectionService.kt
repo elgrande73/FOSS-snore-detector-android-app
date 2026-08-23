@@ -6,10 +6,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
@@ -69,7 +67,6 @@ class SnoreDetectionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var repository: SnoreRepository
     private val snoreAnalyzer = SnoreAnalyzer()
-    private var headsetBroadcastReceiver: BroadcastReceiver? = null
 
     // Service parameters
     private var isSaveClipsEnabled: Boolean = true
@@ -173,43 +170,6 @@ class SnoreDetectionService : Service() {
                 }
             }
         }
-
-        // Register broadcast receiver for hardware headset / Bluetooth connection transitions
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_HEADSET_PLUG)
-            addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
-            @Suppress("DEPRECATION")
-            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
-            @Suppress("DEPRECATION")
-            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
-        }
-        headsetBroadcastReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                val action = intent?.action ?: return
-                Log.i(TAG, "Audio hardware / headset state broadcast received: $action")
-                if (isRecording.get()) {
-                    audioRecord?.let { currentRecord ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            val targetDev = AudioInputManager.findMatchingDeviceInfo(
-                                this@SnoreDetectionService,
-                                selectedAudioInputId,
-                                selectedAudioInputName
-                            ) ?: AudioInputManager.getBuiltInMicrophoneDeviceInfo(this@SnoreDetectionService)
-                            applyPreferredAudioDevice(currentRecord, selectedAudioInputId, selectedAudioInputName, targetDev)
-                        }
-                    }
-                }
-            }
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(headsetBroadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                registerReceiver(headsetBroadcastReceiver, filter)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to register headsetBroadcastReceiver: ${e.message}")
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -276,128 +236,6 @@ class SnoreDetectionService : Service() {
         return null
     }
 
-    private fun createAndStartAudioRecord(
-        sampleRate: Int,
-        channelConfig: Int,
-        audioFormat: Int,
-        bufferSize: Int,
-        audioSource: Int,
-        targetDeviceInfo: AudioDeviceInfo?
-    ): AudioRecord? {
-        var record: AudioRecord? = null
-        try {
-            record = AudioRecord(
-                audioSource,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord init with source $audioSource failed: ${e.message}")
-            if (audioSource != MediaRecorder.AudioSource.MIC) {
-                try {
-                    record = AudioRecord(
-                        MediaRecorder.AudioSource.MIC,
-                        sampleRate,
-                        channelConfig,
-                        audioFormat,
-                        bufferSize
-                    )
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Fallback AudioRecord init failed", e2)
-                }
-            }
-        }
-
-        if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord failed to initialize")
-            try { record?.release() } catch (_: Exception) {}
-            return null
-        }
-
-        audioRecord = record
-
-        // Note: We deliberately do NOT attach hardware AcousticEchoCanceler / NoiseSuppressor effects here
-        // because AEC couples the recording session to system playback streams, causing HAL mutes when media pauses.
-
-        // Apply user's selected input device routing
-        applyPreferredAudioDevice(record, selectedAudioInputId, selectedAudioInputName, targetDeviceInfo)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try {
-                record.addOnRoutingChangedListener({ routedRecord ->
-                    val currentRecord = routedRecord as? AudioRecord
-                    val routed = currentRecord?.routedDevice
-                    val eval = AudioInputManager.evaluateAudioRouting(
-                        configuredId = selectedAudioInputId,
-                        configuredName = selectedAudioInputName,
-                        routedDevice = routed
-                    )
-                    val addressStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && routed != null) routed.address ?: "N/A" else "N/A"
-                    Log.i(
-                        TAG,
-                        """
-                        |=== AudioRecord OnRoutingChanged ===
-                        | Configured input: ${eval.configuredDisplayName}
-                        | Actual routed input: ${routed?.productName ?: "N/A"} (id=${routed?.id ?: "N/A"}, type=${routed?.type ?: "N/A"}, address=$addressStr)
-                        | Active UI input: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
-                        | AudioRecord State: ${currentRecord?.state}, RecordingState: ${currentRecord?.recordingState}
-                        |===================================
-                        """.trimMargin()
-                    )
-                    _configuredInputDeviceName.value = eval.configuredDisplayName
-                    _activeInputDeviceName.value = eval.activeDisplayName
-                    _isFallbackActive.value = eval.isFallback
-                }, null)
-            } catch (e: Exception) {
-                Log.w(TAG, "RoutingChangedListener not supported: ${e.message}")
-            }
-        }
-
-        try {
-            record.startRecording()
-            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                Log.w(TAG, "AudioRecord startRecording called but recordingState is ${record.recordingState}")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to startRecording", e)
-            try { record.release() } catch (_: Exception) {}
-            audioRecord = null
-            return null
-        }
-
-        // Log verified routing diagnostics immediately after startRecording
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val preferred = record.preferredDevice
-            val routed = record.routedDevice
-            val eval = AudioInputManager.evaluateAudioRouting(
-                configuredId = selectedAudioInputId,
-                configuredName = selectedAudioInputName,
-                routedDevice = routed ?: preferred ?: targetDeviceInfo
-            )
-
-            Log.i(
-                TAG,
-                """
-                |======================================================
-                | Recording Started - Audio Routing Diagnostics
-                | Configured input: ${eval.configuredDisplayName}
-                | Preferred device: ${preferred?.productName} (id=${preferred?.id ?: "null"})
-                | Actual routed device: ${routed?.productName} (id=${routed?.id ?: "pending"})
-                | Active UI Device Name: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
-                | AudioRecord State: ${record.state}, RecordingState: ${record.recordingState}
-                |======================================================
-                """.trimMargin()
-            )
-            _configuredInputDeviceName.value = eval.configuredDisplayName
-            _activeInputDeviceName.value = eval.activeDisplayName
-            _isFallbackActive.value = eval.isFallback
-        }
-
-        return record
-    }
-
     /**
      * Set up and start the AudioRecord mic-capturing loop on dispatch thread.
      */
@@ -432,9 +270,9 @@ class SnoreDetectionService : Service() {
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
             }
 
-            // Select AudioSource: MediaRecorder.AudioSource.MIC provides clean, independent acoustic capture
-            // that never intercepts headset hook or media button events in AudioPolicyManager/MediaSession.
-            val audioSource = MediaRecorder.AudioSource.MIC
+            // Select AudioSource: VOICE_RECOGNITION configures audio HAL with voice tuning and echo reference.
+            // Falls back to MIC if unsupported by custom hardware.
+            val audioSource = MediaRecorder.AudioSource.VOICE_RECOGNITION
 
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
@@ -459,16 +297,63 @@ class SnoreDetectionService : Service() {
             // Ensure buffer size is larger than processing window
             val finalBufferSize = (minBufferSize * 2).coerceAtLeast(4096)
 
-            var record: AudioRecord? = createAndStartAudioRecord(
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                finalBufferSize,
-                audioSource,
-                targetDeviceInfo
-            )
+            var record: AudioRecord? = null
+            try {
+                record = AudioRecord(
+                    audioSource,
+                    sampleRate,
+                    channelConfig,
+                    audioFormat,
+                    finalBufferSize
+                )
+            } catch (e: SecurityException) {
+                val errorStr = "Microphone record audio permissions not granted"
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "PERMISSION_DENIED",
+                    message = errorStr,
+                    throwable = e,
+                    component = "Service"
+                )
+                _isServiceRunning.value = false
+                AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
+                stopSelf()
+                return@launch
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize AudioRecord with audioSource=$audioSource", e)
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_RECORD_INIT_ERROR",
+                    message = "Primary AudioRecord initialization failed with source $audioSource: ${e.message}",
+                    throwable = e,
+                    component = "AudioRecord",
+                    additionalDiagnostics = mapOf("AudioSource" to audioSource.toString())
+                )
+                // Fallback to standard MIC audio source if VOICE_RECOGNITION initialization fails
+                if (audioSource != MediaRecorder.AudioSource.MIC) {
+                    try {
+                        record = AudioRecord(
+                            MediaRecorder.AudioSource.MIC,
+                            sampleRate,
+                            channelConfig,
+                            audioFormat,
+                            finalBufferSize
+                        )
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Failed fallback AudioRecord initialization", e2)
+                        ErrorLogger.log(
+                            context = applicationContext,
+                            errorType = "AUDIO_RECORD_FALLBACK_ERROR",
+                            message = "Fallback AudioRecord initialization with MIC source failed: ${e2.message}",
+                            throwable = e2,
+                            component = "AudioRecord"
+                        )
+                    }
+                }
+            }
 
-            if (record == null) {
+            if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
                 val errorStr = "Failed to initialize microphone hardware. Device might be busy."
                 _serviceError.value = errorStr
                 ErrorLogger.log(
@@ -477,13 +362,102 @@ class SnoreDetectionService : Service() {
                     message = errorStr,
                     component = "AudioRecord",
                     additionalDiagnostics = mapOf(
-                        "ConfiguredInput" to _configuredInputDeviceName.value
+                        "ConfiguredInput" to _configuredInputDeviceName.value,
+                        "RecordState" to (record?.state?.toString() ?: "null")
                     )
                 )
+                try { record?.release() } catch (_: Exception) {}
                 _isServiceRunning.value = false
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
                 stopSelf()
                 return@launch
+            }
+
+            audioRecord = record
+
+            // Attach AcousticEchoCanceler and NoiseSuppressor hardware effects to prevent USB/speaker loopback bleed
+            attachAudioEffects(record.audioSessionId)
+
+            // Apply user's selected input device routing
+            applyPreferredAudioDevice(record, selectedAudioInputId, selectedAudioInputName, targetDeviceInfo)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    record.addOnRoutingChangedListener({ routedRecord ->
+                        val currentRecord = routedRecord as? AudioRecord
+                        val routed = currentRecord?.routedDevice
+                        val eval = AudioInputManager.evaluateAudioRouting(
+                            configuredId = selectedAudioInputId,
+                            configuredName = selectedAudioInputName,
+                            routedDevice = routed
+                        )
+                        val addressStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && routed != null) routed.address ?: "N/A" else "N/A"
+                        Log.i(
+                            TAG,
+                            """
+                            |=== AudioRecord OnRoutingChanged ===
+                            | Configured input: ${eval.configuredDisplayName}
+                            | Actual routed input: ${routed?.productName ?: "N/A"} (id=${routed?.id ?: "N/A"}, type=${routed?.type ?: "N/A"}, address=$addressStr)
+                            | Active UI input: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
+                            | AudioRecord State: ${currentRecord?.state}, RecordingState: ${currentRecord?.recordingState}
+                            |===================================
+                            """.trimMargin()
+                        )
+                        _configuredInputDeviceName.value = eval.configuredDisplayName
+                        _activeInputDeviceName.value = eval.activeDisplayName
+                        _isFallbackActive.value = eval.isFallback
+                    }, null)
+                } catch (e: Exception) {
+                    Log.w(TAG, "RoutingChangedListener not supported: ${e.message}")
+                }
+            }
+
+            try {
+                record.startRecording()
+            } catch (e: Exception) {
+                val errorStr = "Microphone is being locked by another application."
+                _serviceError.value = errorStr
+                ErrorLogger.log(
+                    context = applicationContext,
+                    errorType = "AUDIO_LOCK_ERROR",
+                    message = errorStr,
+                    throwable = e,
+                    component = "AudioRecord"
+                )
+                try { record.release() } catch (_: Exception) {}
+                audioRecord = null
+                _isServiceRunning.value = false
+                AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
+                stopSelf()
+                return@launch
+            }
+
+            // Log verified routing diagnostics immediately after startRecording
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val preferred = record.preferredDevice
+                val routed = record.routedDevice
+                val eval = AudioInputManager.evaluateAudioRouting(
+                    configuredId = selectedAudioInputId,
+                    configuredName = selectedAudioInputName,
+                    routedDevice = routed ?: preferred ?: targetDeviceInfo
+                )
+
+                Log.i(
+                    TAG,
+                    """
+                    |======================================================
+                    | Recording Started - Audio Routing Diagnostics
+                    | Configured input: ${eval.configuredDisplayName}
+                    | Preferred device: ${preferred?.productName} (id=${preferred?.id ?: "null"})
+                    | Actual routed device: ${routed?.productName} (id=${routed?.id ?: "pending"})
+                    | Active UI Device Name: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
+                    | AudioRecord State: ${record.state}, RecordingState: ${record.recordingState}
+                    |======================================================
+                    """.trimMargin()
+                )
+                _configuredInputDeviceName.value = eval.configuredDisplayName
+                _activeInputDeviceName.value = eval.activeDisplayName
+                _isFallbackActive.value = eval.isFallback
             }
 
             Log.d(TAG, "AudioRecord started successfully with audioSource=$audioSource")
@@ -511,16 +485,15 @@ class SnoreDetectionService : Service() {
             // Pre-allocate reading buffer (N=1024 samples)
             val audioBuffer = ShortArray(1024)
 
-            // Diagnostic logging counters for non-zero audio verification and self-healing recovery
+            // Diagnostic logging counters for non-zero audio verification
             var diagnosticFrameCount = 0
             var consecutiveZeroFrames = 0
-            var consecutiveErrorReads = 0
             var lastPlaybackPollMillis = 0L
 
             try {
                 while (isActive && isRecording.get()) {
                     val readResult = try {
-                        record?.read(audioBuffer, 0, audioBuffer.size) ?: -1
+                        record.read(audioBuffer, 0, audioBuffer.size)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error reading audio buffer", e)
                         -1
@@ -528,53 +501,10 @@ class SnoreDetectionService : Service() {
 
                     if (!isRecording.get() || !isActive) break
 
-                    // Inspect readResult for error codes and dead HAL stream
-                    if (readResult < 0 || record?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                        consecutiveErrorReads++
-                        val errName = when (readResult) {
-                            AudioRecord.ERROR_INVALID_OPERATION -> "ERROR_INVALID_OPERATION"
-                            AudioRecord.ERROR_BAD_VALUE -> "ERROR_BAD_VALUE"
-                            AudioRecord.ERROR_DEAD_OBJECT -> "ERROR_DEAD_OBJECT"
-                            else -> "ERROR ($readResult)"
-                        }
-                        Log.w(TAG, "AudioRecord read returned $errName (consecutiveErrors=$consecutiveErrorReads, state=${record?.recordingState})")
-
-                        if (consecutiveErrorReads >= 5 || readResult == AudioRecord.ERROR_DEAD_OBJECT || record?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                            Log.w(TAG, "Initiating AudioRecord self-healing recovery after read error or route disruption...")
-                            ErrorLogger.log(
-                                context = applicationContext,
-                                errorType = "AUDIO_STREAM_RECOVERED",
-                                message = "AudioRecord recovered after hardware routing change or media pause (error: $errName)",
-                                component = "SnoreDetectionService"
-                            )
-                            try { record?.stop() } catch (_: Exception) {}
-                            try { record?.release() } catch (_: Exception) {}
-                            releaseAudioEffects()
-                            delay(250) // Allow HAL audio route to settle
-                            val currentTarget = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                AudioInputManager.findMatchingDeviceInfo(this@SnoreDetectionService, selectedAudioInputId, selectedAudioInputName)
-                                    ?: AudioInputManager.getBuiltInMicrophoneDeviceInfo(this@SnoreDetectionService)
-                            } else null
-                            record = createAndStartAudioRecord(sampleRate, channelConfig, audioFormat, finalBufferSize, audioSource, currentTarget)
-                            consecutiveErrorReads = 0
-                            consecutiveZeroFrames = 0
-                            if (record == null) {
-                                Log.e(TAG, "AudioRecord recovery attempt failed; waiting before retry")
-                                delay(1000)
-                            }
-                        } else {
-                            delay(20)
-                        }
-                        continue
-                    }
-
-                    if (readResult == 0) {
+                    if (readResult <= 0) {
                         delay(10)
                         continue
                     }
-
-                    // Successful read: reset consecutive error reads
-                    consecutiveErrorReads = 0
 
                     val currentMillis = System.currentTimeMillis()
 
@@ -600,28 +530,6 @@ class SnoreDetectionService : Service() {
                         consecutiveZeroFrames = 0
                     } else {
                         consecutiveZeroFrames++
-                    }
-
-                    // Anomaly recovery: if 50 consecutive frames (~3.2s) are pure digital zero, re-apply preferred device
-                    if (consecutiveZeroFrames == 50) {
-                        Log.w(TAG, "Detected 50 consecutive zero-sample frames (~3.2s silence). Re-evaluating audio device binding...")
-                        val targetDev = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            AudioInputManager.findMatchingDeviceInfo(this@SnoreDetectionService, selectedAudioInputId, selectedAudioInputName)
-                                ?: AudioInputManager.getBuiltInMicrophoneDeviceInfo(this@SnoreDetectionService)
-                        } else null
-                        record?.let { applyPreferredAudioDevice(it, selectedAudioInputId, selectedAudioInputName, targetDev) }
-                    } else if (consecutiveZeroFrames >= 100 && consecutiveZeroFrames % 50 == 0) {
-                        Log.w(TAG, "Persistent zero-sample anomaly ($consecutiveZeroFrames frames). Full AudioRecord self-healing restart...")
-                        try { record?.stop() } catch (_: Exception) {}
-                        try { record?.release() } catch (_: Exception) {}
-                        releaseAudioEffects()
-                        delay(150)
-                        val currentTarget = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            AudioInputManager.findMatchingDeviceInfo(this@SnoreDetectionService, selectedAudioInputId, selectedAudioInputName)
-                                ?: AudioInputManager.getBuiltInMicrophoneDeviceInfo(this@SnoreDetectionService)
-                        } else null
-                        record = createAndStartAudioRecord(sampleRate, channelConfig, audioFormat, finalBufferSize, audioSource, currentTarget)
-                        consecutiveZeroFrames = 0
                     }
 
                     val frameSamples = audioBuffer.copyOf(readResult)
@@ -652,8 +560,7 @@ class SnoreDetectionService : Service() {
                     // Diagnostic logging every ~5 seconds (~75 frames)
                     diagnosticFrameCount++
                     if (diagnosticFrameCount % 78 == 0) {
-                        val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) record?.routedDevice else null
-                        val preferred = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) record?.preferredDevice else null
+                        val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) record.routedDevice else null
                         val routedName = routed?.productName?.takeIf { it.isNotBlank() }?.toString()
                             ?: routed?.let { AudioInputManager.getDeviceTypeName(it.type) }
                             ?: _activeInputDeviceName.value
@@ -661,16 +568,14 @@ class SnoreDetectionService : Service() {
                             TAG,
                             """
                             |--- [Audio Stream Health Diagnostics] ---
-                            | Thread: ${Thread.currentThread().name}
-                            | AudioRecord State: ${record?.state}, RecordingState: ${record?.recordingState}
-                            | Audio Source: MediaRecorder.AudioSource.MIC ($audioSource), SampleRate: $sampleRate
-                            | Configured Input: ${_configuredInputDeviceName.value}
-                            | Preferred Device: ${preferred?.productName ?: "None"} (id=${preferred?.id ?: "N/A"})
-                            | Active Routed Device: $routedName (id=${routed?.id ?: "N/A"}, type=${routed?.type ?: "N/A"})
-                            | Samples Read: $readResult, Max Amplitude: $maxAbsSample, RMS dB: ${String.format(Locale.US, "%.1f", result.db)}
+                            | Configured: ${_configuredInputDeviceName.value}
+                            | Active Routed: $routedName (type=${routed?.type ?: "N/A"})
+                            | Audio Source: $audioSource, Samples Read: $readResult
+                            | Max Amplitude: $maxAbsSample, RMS dB: ${String.format(Locale.US, "%.1f", result.db)}
                             | Non-Zero Audio: $hasNonZeroAudio (Zero streak: $consecutiveZeroFrames frames)
-                            | System Media Playing: ${_isMediaPlaying.value} (ignoreDuringMediaPlayback=${currentConfig.ignoreDuringMediaPlayback})
-                            | Detection Suspended: $isMediaActive, Snoring Trigger: effectiveIsSnoring=$effectiveIsSnoring (raw=${result.isSnoring})
+                            | Media Playing: ${_isMediaPlaying.value} (Detection Suspended: $isMediaActive)
+                            | Snoring State: effectiveIsSnoring=$effectiveIsSnoring (raw=${result.isSnoring})
+                            | AEC Active: ${acousticEchoCanceler?.enabled ?: false}, NS Active: ${noiseSuppressor?.enabled ?: false}
                             |------------------------------------------
                             """.trimMargin()
                         )
@@ -849,14 +754,14 @@ class SnoreDetectionService : Service() {
 
                 releaseAudioEffects()
                 try {
-                    if (record?.state == AudioRecord.STATE_INITIALIZED) {
-                        record?.stop()
+                    if (record.state == AudioRecord.STATE_INITIALIZED) {
+                        record.stop()
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error stopping AudioRecord in finally", e)
                 }
                 try {
-                    record?.release()
+                    record.release()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error releasing AudioRecord in finally", e)
                 }
@@ -1127,14 +1032,6 @@ class SnoreDetectionService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service being destroyed")
-        if (headsetBroadcastReceiver != null) {
-            try {
-                unregisterReceiver(headsetBroadcastReceiver)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to unregister headsetBroadcastReceiver: ${e.message}")
-            }
-            headsetBroadcastReceiver = null
-        }
         mediaPlaybackDetector?.stopMonitoring()
         mediaPlaybackDetector = null
         stopAudioCapture()
