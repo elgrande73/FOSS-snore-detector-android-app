@@ -34,6 +34,17 @@ data class AudioInputDevice(
 }
 
 /**
+ * Data model representing the evaluation of logical configured input vs. physical routed input.
+ */
+data class AudioRoutingEvaluation(
+    val configuredDisplayName: String,
+    val activeDisplayName: String,
+    val isFallback: Boolean,
+    val actualDeviceTypeName: String = "",
+    val actualProductName: String = ""
+)
+
+/**
  * Manager utility for detecting, inspecting, filtering, and resolving audio input devices.
  * Distinguishes between all raw devices returned by Android AudioManager and devices that are
  * actually physically connected and usable as recording inputs for AudioRecord.
@@ -360,9 +371,136 @@ object AudioInputManager {
     /**
      * Check if a product name is just a generic fallback label rather than a specific peripheral name.
      */
-    private fun isGenericVendorLabel(name: String): Boolean {
+    fun isGenericVendorLabel(name: String): Boolean {
         val lower = name.lowercase().trim()
         return lower == "android" || lower == "external microphone" || lower == "audio device" || lower == "headset"
+    }
+
+    /**
+     * Check if the target configuration represents the default Built-in Phone Microphone.
+     */
+    fun isPhoneMicrophoneSelection(targetId: Int, targetName: String): Boolean {
+        return targetId == -1 ||
+                targetName.isBlank() ||
+                targetName.equals(AudioInputDevice.PHONE_MIC.name, ignoreCase = true) ||
+                targetName.equals("Phone microphone", ignoreCase = true) ||
+                targetName.equals("Default (Phone Microphone)", ignoreCase = true) ||
+                targetName.contains("Phone", ignoreCase = true) ||
+                targetName.contains("Built-in", ignoreCase = true)
+    }
+
+    /**
+     * Evaluates whether the active audio hardware routing represents a normal resolution of the
+     * user's requested logical device or a genuine fallback to a different device.
+     */
+    fun evaluateAudioRouting(
+        configuredId: Int,
+        configuredName: String,
+        routedDevice: AudioDeviceInfo?
+    ): AudioRoutingEvaluation {
+        val isConfiguredPhoneMic = isPhoneMicrophoneSelection(configuredId, configuredName)
+        val configuredDisplayName = if (isConfiguredPhoneMic) {
+            AudioInputDevice.PHONE_MIC.name
+        } else {
+            configuredName.ifBlank { AudioInputDevice.PHONE_MIC.name }
+        }
+
+        if (routedDevice == null) {
+            // When routedDevice is null (e.g. API < 23 or during initial startup), the standard Android
+            // recording pipeline default is the built-in phone microphone.
+            return if (isConfiguredPhoneMic) {
+                AudioRoutingEvaluation(
+                    configuredDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    activeDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    isFallback = false,
+                    actualDeviceTypeName = "Internal Phone Microphone",
+                    actualProductName = ""
+                )
+            } else {
+                // User requested an external peripheral, but no routing could be established (fell back to default built-in mic)
+                AudioRoutingEvaluation(
+                    configuredDisplayName = configuredDisplayName,
+                    activeDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    isFallback = true,
+                    actualDeviceTypeName = "Internal Phone Microphone",
+                    actualProductName = ""
+                )
+            }
+        }
+
+        val routedType = routedDevice.type
+        val routedTypeName = getDeviceTypeName(routedType)
+        val routedProductName = routedDevice.productName?.toString()?.trim() ?: ""
+        val isRoutedBuiltIn = isBuiltInType(routedType)
+        val isRoutedBt = isBluetoothType(routedType)
+        val isRoutedUsb = isUsbType(routedType)
+        val isRoutedWired = isWiredType(routedType)
+
+        val routedPeripheralDisplayName = when {
+            isRoutedUsb && routedProductName.isNotBlank() && routedProductName != "Android" && !isGenericVendorLabel(routedProductName) -> routedProductName
+            isRoutedUsb -> "USB Audio Microphone"
+            isRoutedBt && routedProductName.isNotBlank() && routedProductName != "Android" && !isGenericVendorLabel(routedProductName) -> routedProductName
+            isRoutedBt -> "Bluetooth Microphone (${getDeviceTypeName(routedType)})"
+            isRoutedWired && routedProductName.isNotBlank() && routedProductName != "Android" && !isGenericVendorLabel(routedProductName) -> routedProductName
+            isRoutedWired -> "Wired Headset Microphone"
+            else -> routedProductName.takeIf { it.isNotBlank() } ?: routedTypeName
+        }
+
+        if (isConfiguredPhoneMic) {
+            // User requested Phone Microphone
+            if (isRoutedBuiltIn) {
+                // Normal resolution: Android resolved "Phone microphone" to the device's built-in microphone
+                // (e.g. TYPE_BUILTIN_MIC, which may report productName "motorola edge", "Pixel 8", etc.).
+                // This is normal hardware resolution, NOT a fallback.
+                return AudioRoutingEvaluation(
+                    configuredDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    activeDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    isFallback = false,
+                    actualDeviceTypeName = routedTypeName,
+                    actualProductName = routedProductName
+                )
+            } else {
+                // Genuine fallback: User requested Phone microphone, but an external peripheral took over routing
+                return AudioRoutingEvaluation(
+                    configuredDisplayName = AudioInputDevice.PHONE_MIC.name,
+                    activeDisplayName = routedPeripheralDisplayName,
+                    isFallback = true,
+                    actualDeviceTypeName = routedTypeName,
+                    actualProductName = routedProductName
+                )
+            }
+        } else {
+            // User requested a specific external peripheral (Bluetooth, USB, Wired headset)
+            val isDirectIdMatch = routedDevice.id == configuredId
+            val isCategoryMatch = (configuredDisplayName.contains("Bluetooth", ignoreCase = true) && isRoutedBt) ||
+                    (configuredDisplayName.contains("USB", ignoreCase = true) && isRoutedUsb) ||
+                    (configuredDisplayName.contains("Wired", ignoreCase = true) && isRoutedWired) ||
+                    (routedProductName.isNotBlank() && routedProductName.equals(configuredDisplayName, ignoreCase = true))
+
+            if (isDirectIdMatch || isCategoryMatch) {
+                return AudioRoutingEvaluation(
+                    configuredDisplayName = configuredDisplayName,
+                    activeDisplayName = configuredDisplayName,
+                    isFallback = false,
+                    actualDeviceTypeName = routedTypeName,
+                    actualProductName = routedProductName
+                )
+            } else {
+                // Genuine fallback: Requested peripheral was not routed, fell back to built-in mic or another route
+                val fallbackDisplayName = if (isRoutedBuiltIn) {
+                    AudioInputDevice.PHONE_MIC.name
+                } else {
+                    routedPeripheralDisplayName
+                }
+                return AudioRoutingEvaluation(
+                    configuredDisplayName = configuredDisplayName,
+                    activeDisplayName = fallbackDisplayName,
+                    isFallback = true,
+                    actualDeviceTypeName = routedTypeName,
+                    actualProductName = routedProductName
+                )
+            }
+        }
     }
 
     /**

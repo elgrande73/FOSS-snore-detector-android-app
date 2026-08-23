@@ -335,6 +335,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
     val errorMsg by SnoreDetectionService.serviceError.collectAsState()
     val configuredInputDeviceName by SnoreDetectionService.configuredInputDeviceName.collectAsState()
     val activeInputDeviceName by SnoreDetectionService.activeInputDeviceName.collectAsState()
+    val isFallbackActive by SnoreDetectionService.isFallbackActive.collectAsState()
     val selectedAudioInputName by viewModel.selectedAudioInputName.collectAsState()
     
     val sessionStartTime by SnoreDetectionService.sessionStartTime.collectAsState()
@@ -538,7 +539,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
             } else {
                 configuredDisplay
             }
-            val isFallback = isRunning && !configuredDisplay.equals(activeDisplay, ignoreCase = true)
+            val isFallback = isRunning && isFallbackActive
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

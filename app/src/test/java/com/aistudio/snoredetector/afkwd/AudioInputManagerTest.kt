@@ -58,5 +58,30 @@ class AudioInputManagerTest {
         assertEquals("System Bus Audio", AudioInputManager.getDeviceTypeName(AudioDeviceInfo.TYPE_BUS))
         assertEquals("Remote Submix Loopback", AudioInputManager.getDeviceTypeName(AudioDeviceInfo.TYPE_REMOTE_SUBMIX))
     }
+
+    @Test
+    fun testPhoneMicrophoneSelectionRecognition() {
+        assertTrue(AudioInputManager.isPhoneMicrophoneSelection(-1, "Phone microphone"))
+        assertTrue(AudioInputManager.isPhoneMicrophoneSelection(-1, ""))
+        assertTrue(AudioInputManager.isPhoneMicrophoneSelection(-1, "Default (Phone Microphone)"))
+        assertTrue(AudioInputManager.isPhoneMicrophoneSelection(-1, "Built-in Microphone"))
+        assertFalse(AudioInputManager.isPhoneMicrophoneSelection(2, "Galaxy Buds2 Pro"))
+        assertFalse(AudioInputManager.isPhoneMicrophoneSelection(5, "USB Condenser Mic"))
+    }
+
+    @Test
+    fun testEvaluateAudioRoutingWithNullDevice() {
+        // When user requested phone microphone and routedDevice is null, it resolves cleanly to phone mic without fallback
+        val evalPhone = AudioInputManager.evaluateAudioRouting(-1, "Phone microphone", null)
+        assertEquals("Phone microphone", evalPhone.configuredDisplayName)
+        assertEquals("Phone microphone", evalPhone.activeDisplayName)
+        assertFalse(evalPhone.isFallback)
+
+        // When user requested external device and routedDevice is null, it falls back to phone mic
+        val evalUsb = AudioInputManager.evaluateAudioRouting(10, "USB Mic", null)
+        assertEquals("USB Mic", evalUsb.configuredDisplayName)
+        assertEquals("Phone microphone", evalUsb.activeDisplayName)
+        assertTrue(evalUsb.isFallback)
+    }
 }
 

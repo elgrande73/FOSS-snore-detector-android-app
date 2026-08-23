@@ -105,6 +105,9 @@ class SnoreDetectionService : Service() {
         private val _activeInputDeviceName = MutableStateFlow(AudioInputDevice.PHONE_MIC.name)
         val activeInputDeviceName = _activeInputDeviceName.asStateFlow()
 
+        private val _isFallbackActive = MutableStateFlow(false)
+        val isFallbackActive = _isFallbackActive.asStateFlow()
+
         private val _serviceError = MutableStateFlow<String?>(null)
         val serviceError = _serviceError.asStateFlow()
 
@@ -349,32 +352,26 @@ class SnoreDetectionService : Service() {
                     record.addOnRoutingChangedListener({ routedRecord ->
                         val currentRecord = routedRecord as? AudioRecord
                         val routed = currentRecord?.routedDevice
-                        val preferred = currentRecord?.preferredDevice
-                        val confName = _configuredInputDeviceName.value
-                        if (routed != null) {
-                            val routedName = routed.productName?.takeIf { it.isNotBlank() }?.toString()
-                                ?: AudioInputManager.getDeviceTypeName(routed.type)
-                            val preferredName = preferred?.productName?.takeIf { it.isNotBlank() }?.toString()
-                                ?: preferred?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                                ?: "None"
-                            val addressStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) routed.address ?: "N/A" else "N/A"
-                            Log.i(
-                                TAG,
-                                """
-                                |=== AudioRecord OnRoutingChanged ===
-                                | Configured input: $confName
-                                | Preferred input: $preferredName
-                                | Preferred device result: ${preferred != null}
-                                | Actual routed input: $routedName (id=${routed.id}, type=${routed.type}, address=$addressStr)
-                                | AudioRecord State: ${currentRecord.state}, RecordingState: ${currentRecord.recordingState}
-                                |===================================
-                                """.trimMargin()
-                            )
-                            _activeInputDeviceName.value = routedName
-                        } else {
-                            Log.w(TAG, "AudioRecord OnRoutingChanged: routedDevice is null (falling back to Phone Microphone)")
-                            _activeInputDeviceName.value = AudioInputDevice.PHONE_MIC.name
-                        }
+                        val eval = AudioInputManager.evaluateAudioRouting(
+                            configuredId = selectedAudioInputId,
+                            configuredName = selectedAudioInputName,
+                            routedDevice = routed
+                        )
+                        val addressStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && routed != null) routed.address ?: "N/A" else "N/A"
+                        Log.i(
+                            TAG,
+                            """
+                            |=== AudioRecord OnRoutingChanged ===
+                            | Configured input: ${eval.configuredDisplayName}
+                            | Actual routed input: ${routed?.productName ?: "N/A"} (id=${routed?.id ?: "N/A"}, type=${routed?.type ?: "N/A"}, address=$addressStr)
+                            | Active UI input: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
+                            | AudioRecord State: ${currentRecord?.state}, RecordingState: ${currentRecord?.recordingState}
+                            |===================================
+                            """.trimMargin()
+                        )
+                        _configuredInputDeviceName.value = eval.configuredDisplayName
+                        _activeInputDeviceName.value = eval.activeDisplayName
+                        _isFallbackActive.value = eval.isFallback
                     }, null)
                 } catch (e: Exception) {
                     Log.w(TAG, "RoutingChangedListener not supported: ${e.message}")
@@ -405,28 +402,28 @@ class SnoreDetectionService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val preferred = record.preferredDevice
                 val routed = record.routedDevice
-                val confName = _configuredInputDeviceName.value
-                val preferredName = preferred?.productName?.takeIf { it.isNotBlank() }?.toString()
-                    ?: preferred?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                    ?: "None"
-                val routedName = routed?.productName?.takeIf { it.isNotBlank() }?.toString()
-                    ?: routed?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                    ?: (if (preferred != null) preferredName else AudioInputDevice.PHONE_MIC.name)
+                val eval = AudioInputManager.evaluateAudioRouting(
+                    configuredId = selectedAudioInputId,
+                    configuredName = selectedAudioInputName,
+                    routedDevice = routed ?: preferred ?: targetDeviceInfo
+                )
 
                 Log.i(
                     TAG,
                     """
                     |======================================================
                     | Recording Started - Audio Routing Diagnostics
-                    | Configured input: $confName
-                    | Preferred input: $preferredName
-                    | Preferred device result: ${preferred != null}
-                    | Actual routed input: $routedName (id=${routed?.id ?: "N/A"}, type=${routed?.type ?: "N/A"})
+                    | Configured input: ${eval.configuredDisplayName}
+                    | Preferred device: ${preferred?.productName} (id=${preferred?.id ?: "null"})
+                    | Actual routed device: ${routed?.productName} (id=${routed?.id ?: "pending"})
+                    | Active UI Device Name: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
                     | AudioRecord State: ${record.state}, RecordingState: ${record.recordingState}
                     |======================================================
                     """.trimMargin()
                 )
-                _activeInputDeviceName.value = routedName
+                _configuredInputDeviceName.value = eval.configuredDisplayName
+                _activeInputDeviceName.value = eval.activeDisplayName
+                _isFallbackActive.value = eval.isFallback
             }
 
             Log.d(TAG, "AudioRecord started successfully with audioSource=$audioSource")
@@ -855,14 +852,11 @@ class SnoreDetectionService : Service() {
                     val activePreferred = record.preferredDevice
                     val currentRouted = record.routedDevice
 
-                    val preferredName = activePreferred?.productName?.takeIf { it.isNotBlank() }?.toString()
-                        ?: activePreferred?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                        ?: targetDevice.productName?.takeIf { it.isNotBlank() }?.toString()
-                        ?: AudioInputManager.getDeviceTypeName(targetDevice.type)
-
-                    val routedName = currentRouted?.productName?.takeIf { it.isNotBlank() }?.toString()
-                        ?: currentRouted?.let { AudioInputManager.getDeviceTypeName(it.type) }
-                        ?: preferredName
+                    val eval = AudioInputManager.evaluateAudioRouting(
+                        configuredId = deviceId,
+                        configuredName = deviceName,
+                        routedDevice = currentRouted ?: activePreferred ?: targetDevice
+                    )
 
                     val channelCountsStr = targetDevice.channelCounts.let { if (it.isEmpty()) "Standard/All" else it.joinToString(", ") }
                     val sampleRatesStr = targetDevice.sampleRates.let { if (it.isEmpty()) "Standard/Resampled" else it.joinToString(", ") { r -> "${r}Hz" } }
@@ -872,7 +866,7 @@ class SnoreDetectionService : Service() {
                         TAG,
                         """
                         |=== [Audio Input Device Inspection & Configuration] ===
-                        |  * Configured input: $configuredName
+                        |  * Configured input: ${eval.configuredDisplayName}
                         |  * Target Device ID: ${targetDevice.id}
                         |  * Target Type: ${targetDevice.type} (${AudioInputManager.getDeviceTypeName(targetDevice.type)})
                         |  * Target Product Name: "${targetDevice.productName}"
@@ -885,25 +879,36 @@ class SnoreDetectionService : Service() {
                         |  * AudioRecord.getRoutedDevice(): "${currentRouted?.productName}" (id=${currentRouted?.id ?: "pending"})
                         |  * AudioRecord.getState(): ${record.state} (STATE_INITIALIZED=${AudioRecord.STATE_INITIALIZED})
                         |  * AudioRecord.getRecordingState(): ${record.recordingState} (RECORDSTATE_RECORDING=${AudioRecord.RECORDSTATE_RECORDING})
-                        |  * Active UI Device Name: $routedName
+                        |  * Active UI Device Name: ${eval.activeDisplayName} (Fallback: ${eval.isFallback})
                         |======================================================
                         """.trimMargin()
                     )
 
-                    _activeInputDeviceName.value = routedName
+                    _configuredInputDeviceName.value = eval.configuredDisplayName
+                    _activeInputDeviceName.value = eval.activeDisplayName
+                    _isFallbackActive.value = eval.isFallback
                     return setOk
                 } catch (e: Exception) {
                     Log.e(TAG, "Error setting preferred audio device to target", e)
-                    _activeInputDeviceName.value = AudioInputDevice.PHONE_MIC.name
+                    val eval = AudioInputManager.evaluateAudioRouting(deviceId, deviceName, null)
+                    _configuredInputDeviceName.value = eval.configuredDisplayName
+                    _activeInputDeviceName.value = eval.activeDisplayName
+                    _isFallbackActive.value = eval.isFallback
                     return false
                 }
             } else {
                 Log.w(TAG, "No valid AudioDeviceInfo found; keeping Phone Microphone")
-                _activeInputDeviceName.value = AudioInputDevice.PHONE_MIC.name
+                val eval = AudioInputManager.evaluateAudioRouting(deviceId, deviceName, null)
+                _configuredInputDeviceName.value = eval.configuredDisplayName
+                _activeInputDeviceName.value = eval.activeDisplayName
+                _isFallbackActive.value = eval.isFallback
                 return false
             }
         } else {
-            _activeInputDeviceName.value = AudioInputDevice.PHONE_MIC.name
+            val eval = AudioInputManager.evaluateAudioRouting(deviceId, deviceName, null)
+            _configuredInputDeviceName.value = eval.configuredDisplayName
+            _activeInputDeviceName.value = eval.activeDisplayName
+            _isFallbackActive.value = eval.isFallback
             return false
         }
     }
@@ -939,7 +944,9 @@ class SnoreDetectionService : Service() {
         _liveAnalysis.value = null
         _sessionStartTime.value = 0L
         _sessionEventCount.value = 0
+        _configuredInputDeviceName.value = AudioInputDevice.DEFAULT_DEVICE.name
         _activeInputDeviceName.value = AudioInputDevice.DEFAULT_DEVICE.name
+        _isFallbackActive.value = false
         super.onDestroy()
     }
 }
