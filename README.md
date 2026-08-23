@@ -70,6 +70,8 @@ Snore Detector adheres strictly to F-Droid Free and Open Source Software guideli
 | **Signal Processing**  | On-device Android `AudioRecord` PCM 16-bit buffer processing with FFT spectral decomposition                               |
 | **Foreground Service** | Persistent foreground monitoring service ensuring continuous overnight tracking without OS background execution throttling |
 
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the complete arc42-aligned System & Software Architecture documentation and diagrams.
+
 ---
 
 ## 🚀 Building From Source
