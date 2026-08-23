@@ -103,5 +103,6 @@ cd FOSS-snore-detector-android-app
 ```text
 Copyright 2026 elgrande73
 For questions, contact: elgrande.github@gmail.com
+Made with love in Estonia 🇪🇪
 ```
 
