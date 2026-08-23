@@ -1,7 +1,7 @@
 # System & Software Architecture Documentation (arc42 Aligned)
 
 **Application:** Snore Detector for Android (FOSS / F-Droid Distribution)  
-**Package:** `com.aistudio.snoredetector`  
+**Package:** `com.aistudio.snoredetector.afkwd`  
 **Target Platform:** Android 7.0 (API Level 24) through Android 15 / 16 (API Level 36)
 
 ---
@@ -17,7 +17,7 @@ graph TD
     User([User / Sleeper])
     
     subgraph AndroidDevice ["Android Device Host Environment"]
-        App["Snore Detector Application<br/>(com.aistudio.snoredetector)"]
+        App["Snore Detector Application<br/>(com.aistudio.snoredetector.afkwd)"]
         OS["Android OS / Framework APIs<br/>(AudioManager, AudioRecord, Room SQLite)"]
         Mic["Microphone Hardware<br/>(Built-in Mic, USB Audio, BT Headset/Mask)"]
         Speaker["Media Playback Engines<br/>(Podcasts, Music Players, Audiobooks)"]
@@ -431,7 +431,7 @@ graph TD
             PermBT["android.permission.BLUETOOTH_CONNECT"]
         end
 
-        subgraph Local_App_Sandbox ["Snore Detector Private Sandbox (/data/data/com.aistudio.snoredetector/)"]
+        subgraph Local_App_Sandbox ["Snore Detector Private Sandbox (/data/data/com.aistudio.snoredetector.afkwd/)"]
             Service["SnoreDetectionService (android:exported=false)"]
             DB["Room SQLite Database (No external access)"]
             AudioFiles["Private Internal Audio Clips (No world-readable permissions)"]
@@ -487,7 +487,7 @@ graph TD
 
     subgraph Device_Runtime ["End-User Android Device Target"]
         OS_Runtime["Android OS 7.0 - 16 (API 24 - 36)"]
-        AppPkg["Installed App Sandbox (com.aistudio.snoredetector)"]
+        AppPkg["Installed App Sandbox (com.aistudio.snoredetector.afkwd)"]
         AudioHAL["Hardware Audio Subsystem"]
         
         FDroid -->|Installs| AppPkg
