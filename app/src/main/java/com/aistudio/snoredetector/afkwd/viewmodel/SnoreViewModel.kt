@@ -99,7 +99,8 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     val exportSummary = _exportSummary.asStateFlow()
 
     // Threshold Config State flows
-    private val _useRms = MutableStateFlow(prefs.getBoolean("useRms", true))
+    // Amplitude dB criterion is mandatory and always active (cannot be disabled)
+    private val _useRms = MutableStateFlow(true)
     val useRms = _useRms.asStateFlow()
 
     private val _rmsDbThreshold = MutableStateFlow(prefs.getFloat("rmsDbThreshold", 55.0f))
@@ -185,6 +186,11 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
         // Load cached last-measurement points from disk if any
         loadLastSavedTimelineOffline()
+
+        // Safely handle/migrate legacy useRms setting: amplitude dB criterion is always enabled
+        if (prefs.contains("useRms")) {
+            prefs.edit().putBoolean("useRms", true).apply()
+        }
 
         // Bind timeline state combining either background service data (in-progress) or our saved historical timeline
         timelineDisplayState = combine(
@@ -272,48 +278,74 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateUseRms(value: Boolean) {
-        _useRms.value = value
-        prefs.edit().putBoolean("useRms", value).apply()
+        // Amplitude dB criterion is always active
+        _useRms.value = true
+        prefs.edit().putBoolean("useRms", true).apply()
     }
 
     fun updateRmsDbThreshold(value: Float) {
         _rmsDbThreshold.value = value
         prefs.edit().putFloat("rmsDbThreshold", value).apply()
+        // If the service is currently running, pass updated configuration intent immediately
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateUseZcr(value: Boolean) {
         _useZcr.value = value
         prefs.edit().putBoolean("useZcr", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateZcrThreshold(value: Float) {
         _zcrThreshold.value = value
         prefs.edit().putFloat("zcrThreshold", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateUseBandEnergy(value: Boolean) {
         _useBandEnergy.value = value
         prefs.edit().putBoolean("useBandEnergy", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateBandEnergyThreshold(value: Float) {
         _bandEnergyThreshold.value = value
         prefs.edit().putFloat("bandEnergyThreshold", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateUseLowFreqRatio(value: Boolean) {
         _useLowFreqRatio.value = value
         prefs.edit().putBoolean("useLowFreqRatio", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateLowFreqRatioThreshold(value: Float) {
         _lowFreqRatioThreshold.value = value
         prefs.edit().putFloat("lowFreqRatioThreshold", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateMinDurationSeconds(value: Float) {
         _minDurationSeconds.value = value
         prefs.edit().putFloat("minDurationSeconds", value).apply()
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
     }
 
     fun updateSaveAudioClips(value: Boolean) {

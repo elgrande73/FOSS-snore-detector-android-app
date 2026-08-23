@@ -206,13 +206,13 @@ fun GuideTab() {
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Bluetooth Sleep Masks & External Microphones:",
+                        text = "External Microphones & Audio Devices:",
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "If you wear a Bluetooth sleep mask with a built-in microphone, select it under Settings -> Audio Input Source. Snore Detector captures the mask's microphone without interrupting simultaneous Bluetooth media playback (such as bedtime audiobooks, podcasts, or music) or device hardware buttons.",
+                        text = "If you use a device with a built-in microphone, select it under Settings → Audio Input Source. Snore Detector captures audio from the selected device's microphone while allowing simultaneous Bluetooth or wired media playback (such as bedtime audiobooks, podcasts, or music) and use of the device's hardware buttons.",
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -246,13 +246,13 @@ fun GuideTab() {
 
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Real-Time Smartwatch & Companion Alerts:",
+                        text = "Real-Time Snoring Alerts:",
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "If enabled in Settings, the app generates a high-priority Android notification immediately when a snoring incident is confirmed. You can pair this with FOSS companion apps like Gadgetbridge to make a connected smartwatch or band vibrate during snoring episodes.",
+                        text = "If enabled in Settings, the app generates a high-priority Android notification immediately when a snoring incident is confirmed. This provides an instant alert on your device and can optionally be used with compatible notification or companion devices to provide additional alerts.",
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -276,8 +276,8 @@ fun GuideTab() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     MetricExplanationItem(
-                        title = "Acoustic level (Sound Volume in Decibels)",
-                        description = "Shows how strong the recorded audio signal was in decibels (dB) calculated from RMS power. Unless specifically calibrated, this should not be interpreted as a laboratory-accurate sound-pressure measurement."
+                        title = "Sound Volume (Decibels dB) — Mandatory Criterion",
+                        description = "Shows how strong the recorded audio signal was in decibels (dB) calculated from RMS power. This amplitude criterion is always active and mandatory for detection. Adjust the detection threshold to match your room’s acoustics and the level of background noise picked up by the microphone."
                     )
                     MetricExplanationItem(
                         title = "Zero-Crossing Rate (ZCR / Pitch)",

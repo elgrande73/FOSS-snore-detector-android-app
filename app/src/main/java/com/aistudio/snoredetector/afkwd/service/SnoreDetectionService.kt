@@ -153,7 +153,7 @@ class SnoreDetectionService : Service() {
             selectedAudioInputName = it.getStringExtra("audioInputName") ?: ""
             
             currentConfig = DetectionConfig(
-                useRms = it.getBooleanExtra("useRms", true),
+                useRms = true, // Amplitude dB criterion is mandatory and always enabled
                 useZcr = it.getBooleanExtra("useZcr", true),
                 useBandEnergy = it.getBooleanExtra("useBandEnergy", true),
                 useLowFreqRatio = it.getBooleanExtra("useLowFreqRatio", true),

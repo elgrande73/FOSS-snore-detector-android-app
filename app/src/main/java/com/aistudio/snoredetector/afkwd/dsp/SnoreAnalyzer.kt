@@ -23,20 +23,21 @@ data class AnalysisResult(
  * Configuration of parameters and activation states for the snore-detection methods.
  *
  * Logical Relationship:
- * An audio frame is classified as a snore if and only if ALL activated DSP features
- * simultaneously meet their respective thresholds (Logical AND).
+ * The amplitude dB criterion (RMS Sound Volume) is mandatory and always active.
+ * An audio frame is classified as a snore if and only if the amplitude dB criterion
+ * and ALL other activated DSP features simultaneously meet their respective thresholds (Logical AND).
  *
  * Threshold Directions:
- * 1. RMS Sound Volume: Minimum threshold (dB >= rmsDbThreshold)
- * 2. Zero-Crossing Rate (ZCR): Maximum threshold (ZCR <= zcrThreshold)
- * 3. Core Snoring Band Energy: Minimum threshold (energy >= bandEnergyThreshold)
- * 4. Low-Frequency Energy Ratio: Minimum threshold (ratio >= lowFreqRatioThreshold)
+ * 1. RMS Sound Volume (Amplitude dB): Mandatory minimum threshold (dB >= rmsDbThreshold, always enabled)
+ * 2. Zero-Crossing Rate (ZCR): Optional maximum threshold (ZCR <= zcrThreshold)
+ * 3. Core Snoring Band Energy: Optional minimum threshold (energy >= bandEnergyThreshold)
+ * 4. Low-Frequency Energy Ratio: Optional minimum threshold (ratio >= lowFreqRatioThreshold)
  *
  * Time Condition:
  * Consecutive snore frames must persist for at least minDurationSeconds to be logged as a snore incident.
  */
 data class DetectionConfig(
-    // Method Activations
+    // Method Activations (useRms is always true and cannot be disabled)
     val useRms: Boolean = true,
     val useZcr: Boolean = true,
     val useBandEnergy: Boolean = true,
@@ -148,16 +149,16 @@ class SnoreAnalyzer {
         val lowFreqMet = lowFreqEnergyRatio >= config.lowFreqRatioThreshold
 
         // Determine if snoring is detected based on active methods.
-        // A block is snoring if ALL activated methods meet their threshold.
-        // If no methods are activated, then snoring is false.
+        // The amplitude dB criterion (RMS Sound Volume) is mandatory and always active.
+        // In addition, all other activated optional methods must meet their thresholds.
         var isSnoring = false
         var activeMethodsCount = 0
         var matchingActiveMethodsCount = 0
 
-        if (config.useRms) {
-            activeMethodsCount++
-            if (rmsMet) matchingActiveMethodsCount++
-        }
+        // Amplitude dB criterion is ALWAYS active and evaluated
+        activeMethodsCount++
+        if (rmsMet) matchingActiveMethodsCount++
+
         if (config.useZcr) {
             activeMethodsCount++
             if (zcrMet) matchingActiveMethodsCount++
@@ -189,3 +190,4 @@ class SnoreAnalyzer {
         )
     }
 }
+

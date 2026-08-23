@@ -823,13 +823,13 @@ fun LiveSpectrumDiagnosticsSection(
                 letterSpacing = 0.5.sp
             )
             
-            // RMS / dB Row
+            // RMS / dB Row (Mandatory & Always Active)
             MetricRow(
-                label = "Decibels Level (RMS)",
+                label = "Decibels Level (RMS - Mandatory)",
                 value = "${String.format(Locale.US, "%.1f", analysis.db)} dB",
                 thresholdStr = ">= ${String.format(Locale.US, "%.1f", rmsDbThreshold)} dB",
                 isMet = analysis.rmsThresholdMet,
-                isActive = useRms
+                isActive = true
             )
 
             // ZCR Row
@@ -2487,7 +2487,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     }
 
                     Text(
-                        text = "Choose which microphone hardware captures audio for snoring detection. Supports Bluetooth sleep masks and wireless headsets without interrupting Bluetooth media playback (audiobooks, podcasts, music) or headphone buttons.",
+                        text = "Choose which microphone to use for snoring detection. The app supports microphones in both wired and Bluetooth audio devices while allowing media playback—such as audiobooks, podcasts, or music—and headphone controls to continue working without interruption.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
@@ -2649,7 +2649,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     if (availableInputDevices.size == 1) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "💡 Tip: To use a Bluetooth sleep mask or headset mic, connect the device in Android Settings -> Bluetooth, then tap the Refresh button above.",
+                            text = "💡 Tip: To use a Bluetooth headset’s microphone, first connect the headset in Android Settings → Bluetooth, then tap the Refresh button above.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2667,7 +2667,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Configure the 4 digital signal processing (DSP) acoustic filters and the duration threshold. A snore is logged when all enabled filters match simultaneously (Logical AND) for the required duration.",
+                    text = "Configure the 4 digital signal processing (DSP) acoustic filters and the duration threshold. The sound volume (amplitude dB) criterion is always active and mandatory. A snore is logged when the amplitude threshold and all other enabled filters match simultaneously (Logical AND) for the required duration.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
@@ -2675,20 +2675,21 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             }
         }
 
-        // Method 1: RMS dB Volume
+        // Method 1: Sound Volume (Amplitude dB) - Mandatory / Always Active
         item(key = "settings_rms_method") {
             ConfigureMethodCard(
-                title = "1. Sound Volume (Decibels)",
+                title = "1. Sound Volume (Amplitude dB)",
                 thresholdType = "Minimum threshold",
                 comparisonSymbol = "≥",
-                description = "Minimum threshold (Value ≥ Threshold). The incoming sound must reach or exceed this decibel level to be considered. Normal quiet sleep acoustics are typically below 45 dB.",
-                isActive = useRms,
-                onActiveChange = { viewModel.updateUseRms(it) },
+                description = "Mandatory acoustic criterion (Value ≥ Threshold). This criterion is always active and cannot be disabled. Incoming audio must reach or exceed this decibel level to be considered for snoring detection. Normal quiet sleep acoustics are typically below 45 dB.",
+                isActive = true,
+                onActiveChange = { /* Always active */ },
                 value = rmsDbThreshold,
                 onValueChange = { viewModel.updateRmsDbThreshold(it) },
                 valueRange = 40.0f..85.0f,
                 labelFormatter = { "${it.toInt()} dB" },
-                defaultValueLabel = "55 dB (Enabled)",
+                defaultValueLabel = "55 dB (Always Active)",
+                isToggleable = false,
                 testTag = "rms_method"
             )
         }
@@ -2938,7 +2939,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                             )
                         }
                         Text(
-                            text = "Send an immediate high-priority Android notification when a snoring incident is confirmed. Ideal for vibrating a connected smartwatch via Gadgetbridge or companion notification sync apps.",
+                            text = "Send an immediate high-priority Android notification when a snoring incident is confirmed. Can be used with compatible notification or companion devices to provide additional alerts.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp)
@@ -3082,7 +3083,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
 
 @Composable
 fun DspFormulaCard(
-    useRms: Boolean,
+    useRms: Boolean = true,
     rmsDbThreshold: Float,
     useZcr: Boolean,
     zcrThreshold: Float,
@@ -3092,8 +3093,7 @@ fun DspFormulaCard(
     lowFreqRatioThreshold: Float,
     minDurationSeconds: Float
 ) {
-    val activeMethodsCount = (if (useRms) 1 else 0) +
-            (if (useZcr) 1 else 0) +
+    val optionalFiltersCount = (if (useZcr) 1 else 0) +
             (if (useBandEnergy) 1 else 0) +
             (if (useLowFreqRatio) 1 else 0)
 
@@ -3124,7 +3124,7 @@ fun DspFormulaCard(
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "$activeMethodsCount of 4 DSP Filters Active",
+                        text = "Volume (Mandatory) + $optionalFiltersCount of 3 Optional Filters",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -3157,75 +3157,58 @@ fun DspFormulaCard(
                         letterSpacing = 0.5.sp
                     )
 
-                    if (activeMethodsCount == 0) {
-                        Text(
-                            text = "⚠️ All acoustic filters disabled (Snore detection inactive)",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    } else {
-                        var isFirstItem = true
+                    // 1. Mandatory RMS dB Volume Condition (Always present)
+                    FormulaConditionRow(
+                        isFirst = true,
+                        label = "Sound Volume (Mandatory)",
+                        condition = "≥ ${rmsDbThreshold.toInt()} dB",
+                        direction = "Mandatory threshold"
+                    )
 
-                        // 1. RMS Condition
-                        if (useRms) {
-                            FormulaConditionRow(
-                                isFirst = isFirstItem,
-                                label = "Volume",
-                                condition = "≥ ${rmsDbThreshold.toInt()} dB",
-                                direction = "Minimum threshold"
-                            )
-                            isFirstItem = false
-                        }
-
-                        // 2. ZCR Condition
-                        if (useZcr) {
-                            FormulaConditionRow(
-                                isFirst = isFirstItem,
-                                label = "Zero-Crossing Rate",
-                                condition = "≤ ${String.format("%.3f", zcrThreshold)}",
-                                direction = "Maximum threshold"
-                            )
-                            isFirstItem = false
-                        }
-
-                        // 3. Band Energy Condition
-                        if (useBandEnergy) {
-                            FormulaConditionRow(
-                                isFirst = isFirstItem,
-                                label = "Snore Band Energy",
-                                condition = "≥ ${String.format("%.4f", bandEnergyThreshold)}",
-                                direction = "Minimum threshold"
-                            )
-                            isFirstItem = false
-                        }
-
-                        // 4. Low Freq Ratio Condition
-                        if (useLowFreqRatio) {
-                            FormulaConditionRow(
-                                isFirst = isFirstItem,
-                                label = "Low-Freq Ratio (<500Hz)",
-                                condition = "≥ ${(lowFreqRatioThreshold * 100).toInt()}%",
-                                direction = "Minimum threshold"
-                            )
-                            isFirstItem = false
-                        }
-
-                        // 5. Time Condition
+                    // 2. ZCR Condition
+                    if (useZcr) {
                         FormulaConditionRow(
                             isFirst = false,
-                            label = "Continuous Duration",
-                            condition = "≥ ${String.format("%.1f", minDurationSeconds)}s",
-                            direction = "Time condition"
+                            label = "Zero-Crossing Rate",
+                            condition = "≤ ${String.format("%.3f", zcrThreshold)}",
+                            direction = "Maximum threshold"
                         )
                     }
+
+                    // 3. Band Energy Condition
+                    if (useBandEnergy) {
+                        FormulaConditionRow(
+                            isFirst = false,
+                            label = "Snore Band Energy",
+                            condition = "≥ ${String.format("%.4f", bandEnergyThreshold)}",
+                            direction = "Minimum threshold"
+                        )
+                    }
+
+                    // 4. Low Freq Ratio Condition
+                    if (useLowFreqRatio) {
+                        FormulaConditionRow(
+                            isFirst = false,
+                            label = "Low-Freq Ratio (<500Hz)",
+                            condition = "≥ ${(lowFreqRatioThreshold * 100).toInt()}%",
+                            direction = "Minimum threshold"
+                        )
+                    }
+
+                    // 5. Time Condition
+                    FormulaConditionRow(
+                        isFirst = false,
+                        label = "Continuous Duration",
+                        condition = "≥ ${String.format("%.1f", minDurationSeconds)}s",
+                        direction = "Time condition"
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Logical Rule: Every enabled acoustic feature must be satisfied simultaneously (AND). Once met, the snoring audio must persist continuously for at least the configured duration to be recorded.",
+                text = "Logical Rule: The mandatory sound volume threshold and every enabled optional acoustic filter must be satisfied simultaneously (Logical AND). Once met, the snoring audio must persist continuously for at least the configured duration to be recorded.",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 15.sp
@@ -3304,6 +3287,7 @@ fun ConfigureMethodCard(
     valueRange: ClosedFloatingPointRange<Float>,
     labelFormatter: (Float) -> String,
     defaultValueLabel: String? = null,
+    isToggleable: Boolean = true,
     testTag: String
 ) {
     Card(
@@ -3324,14 +3308,41 @@ fun ConfigureMethodCard(
                     fontWeight = FontWeight.Bold,
                     color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
                 )
-                Switch(
-                    checked = isActive,
-                    onCheckedChange = onActiveChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = MaterialTheme.colorScheme.primary,
-                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                if (isToggleable) {
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = onActiveChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.primary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                        )
                     )
-                )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Always Active",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Always Active",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
             }
 
             // Direction and type badge + Default value badge
@@ -3352,7 +3363,8 @@ fun ConfigureMethodCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "$thresholdType (Value $comparisonSymbol Threshold)",
+                        text = if (!isToggleable) "Mandatory ($thresholdType: Value $comparisonSymbol Threshold)"
+                               else "$thresholdType (Value $comparisonSymbol Threshold)",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
