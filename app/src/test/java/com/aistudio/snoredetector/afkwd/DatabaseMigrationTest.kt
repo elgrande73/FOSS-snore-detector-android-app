@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
  * Verifies that upgrading from the 1.0.0 database (schema v1) keeps the user's snoring history.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class DatabaseMigrationTest {
 
     private val dbName = "migration-test.db"
