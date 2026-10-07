@@ -82,6 +82,12 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+// Export Room schemas so every database version is reviewable and migrations can be tested.
+// Commit the generated JSON files under app/schemas/.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {

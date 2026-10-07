@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
                 themeMode = themeMode,
                 dynamicColor = dynamicColor
             ) {
-                var selectedTab by remember { mutableStateOf(0) }
+                var selectedTab by rememberSaveable { mutableStateOf(0) } // survives rotation (#11)
                 val context = LocalContext.current
                 
                 // Permission Request Logic
@@ -1124,7 +1124,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
     val context = LocalContext.current
     val dateSdf = remember { SimpleDateFormat("EEEE, MMM dd — hh:mm:ss a", Locale.getDefault()) }
 
-    var historyTabFilter by remember { mutableStateOf(0) } // 0 = Episodes, 1 = Error Logs
+    var historyTabFilter by rememberSaveable { mutableStateOf(0) } // 0 = Episodes, 1 = Error Logs
     var showExportDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showClearErrorsDialog by remember { mutableStateOf(false) }
@@ -3564,11 +3564,15 @@ fun ConfigureMethodCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Title takes the remaining width and wraps; the switch/badge keeps its natural size (#10)
                 Text(
                     text = title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
+                    color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
                 if (isToggleable) {
                     Switch(
@@ -3600,7 +3604,9 @@ fun ConfigureMethodCard(
                                 text = "Always Active",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -3617,6 +3623,7 @@ fun ConfigureMethodCard(
             ) {
                 Box(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -3638,7 +3645,10 @@ fun ConfigureMethodCard(
                         text = "Default: $defaultValueLabel",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }

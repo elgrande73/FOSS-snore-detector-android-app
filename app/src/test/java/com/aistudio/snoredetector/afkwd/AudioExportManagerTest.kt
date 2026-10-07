@@ -24,7 +24,7 @@ class AudioExportManagerTest {
             SnoreEvent(
                 id = 1,
                 timestamp = 1771372800000L,
-                durationSeconds = 2.4f,
+                durationSeconds = 2.4,
                 maxDb = 68.5f,
                 maxRms = 0.045f,
                 meanZcr = 0.08f,
@@ -35,7 +35,7 @@ class AudioExportManagerTest {
             SnoreEvent(
                 id = 2,
                 timestamp = 1771372860000L,
-                durationSeconds = 1.8f,
+                durationSeconds = 1.8,
                 maxDb = 62.0f,
                 maxRms = 0.032f,
                 meanZcr = 0.09f,

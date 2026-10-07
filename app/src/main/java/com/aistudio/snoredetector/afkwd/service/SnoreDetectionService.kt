@@ -15,7 +15,6 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -59,7 +58,6 @@ class SnoreDetectionService : Service() {
 
     private var audioRecord: AudioRecord? = null
     private var acousticEchoCanceler: AcousticEchoCanceler? = null
-    private var noiseSuppressor: NoiseSuppressor? = null
     private var mediaPlaybackDetector: MediaPlaybackDetector? = null
     private val isRecording = AtomicBoolean(false)
     private var recordingJob: Job? = null
@@ -78,6 +76,18 @@ class SnoreDetectionService : Service() {
 
     companion object {
         private const val TAG = "SnoreService"
+
+        /**
+         * Picks the AudioRecord source for the target input.
+         *
+         * Bluetooth SCO microphones need VOICE_RECOGNITION to be routed reliably. All other inputs
+         * use the raw MIC source, as in 1.0.0: VOICE_RECOGNITION applies device-specific gain and
+         * voice tuning (often a low-frequency cut), which shifted dB readings by ~20 dB and
+         * removed the low-frequency snoring energy the detector relies on (issues #9, #12).
+         */
+        fun selectAudioSource(isBluetoothTarget: Boolean): Int =
+            if (isBluetoothTarget) MediaRecorder.AudioSource.VOICE_RECOGNITION else MediaRecorder.AudioSource.MIC
+
         const val NOTIFICATION_ID = 54321
         const val EVENT_NOTIFICATION_ID = 54322
         const val CHANNEL_ID = "snore_detector_service_channel"
@@ -270,9 +280,9 @@ class SnoreDetectionService : Service() {
                 AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
             }
 
-            // Select AudioSource: VOICE_RECOGNITION configures audio HAL with voice tuning and echo reference.
-            // Falls back to MIC if unsupported by custom hardware.
-            val audioSource = MediaRecorder.AudioSource.VOICE_RECOGNITION
+            // Select AudioSource: VOICE_RECOGNITION for Bluetooth SCO microphones, MIC for built-in/USB/wired.
+            // Falls back to MIC if VOICE_RECOGNITION is unsupported by custom hardware.
+            val audioSource = selectAudioSource(isBluetoothTarget)
 
             val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
             if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
@@ -375,7 +385,8 @@ class SnoreDetectionService : Service() {
 
             audioRecord = record
 
-            // Attach AcousticEchoCanceler and NoiseSuppressor hardware effects to prevent USB/speaker loopback bleed
+            // Attach AcousticEchoCanceler to prevent USB/speaker loopback bleed.
+            // No NoiseSuppressor: it is tuned for speech and filters out steady low-frequency snoring.
             attachAudioEffects(record.audioSessionId)
 
             // Apply user's selected input device routing
@@ -575,7 +586,7 @@ class SnoreDetectionService : Service() {
                             | Non-Zero Audio: $hasNonZeroAudio (Zero streak: $consecutiveZeroFrames frames)
                             | Media Playing: ${_isMediaPlaying.value} (Detection Suspended: $isMediaActive)
                             | Snoring State: effectiveIsSnoring=$effectiveIsSnoring (raw=${result.isSnoring})
-                            | AEC Active: ${acousticEchoCanceler?.enabled ?: false}, NS Active: ${noiseSuppressor?.enabled ?: false}
+                            | AEC Active: ${acousticEchoCanceler?.enabled ?: false}
                             |------------------------------------------
                             """.trimMargin()
                         )
@@ -787,19 +798,6 @@ class SnoreDetectionService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to initialize AcousticEchoCanceler on audioSessionId $audioSessionId: ${e.message}")
         }
-
-        try {
-            if (NoiseSuppressor.isAvailable()) {
-                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply {
-                    enabled = true
-                }
-                Log.i(TAG, "NoiseSuppressor enabled on audioSessionId $audioSessionId (success=${noiseSuppressor?.enabled})")
-            } else {
-                Log.d(TAG, "NoiseSuppressor is not supported on this device/HAL")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to initialize NoiseSuppressor on audioSessionId $audioSessionId: ${e.message}")
-        }
     }
 
     private fun releaseAudioEffects() {
@@ -812,16 +810,6 @@ class SnoreDetectionService : Service() {
             Log.w(TAG, "Error releasing AcousticEchoCanceler: ${e.message}")
         }
         acousticEchoCanceler = null
-
-        try {
-            noiseSuppressor?.apply {
-                enabled = false
-                release()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error releasing NoiseSuppressor: ${e.message}")
-        }
-        noiseSuppressor = null
     }
 
     private fun stopAudioCaptureInternal() {

@@ -145,7 +145,7 @@ The detection pipeline processes raw audio in discrete non-overlapping frames of
 flowchart TD
     subgraph Hardware_Capture ["1. Hardware Ingestion"]
         HW["Physical Microphone<br/>(Built-in / USB / BT SCO)"]
-        AR["AudioRecord Native Buffer<br/>• 16,000 Hz, 16-bit Mono PCM<br/>• AudioSource.VOICE_RECOGNITION<br/>• AudioSession AEC & NS Active"]
+        AR["AudioRecord Native Buffer<br/>• 16,000 Hz, 16-bit Mono PCM<br/>• AudioSource.MIC (VOICE_RECOGNITION for Bluetooth)<br/>• AudioSession AEC Active"]
         HW --> AR
     end
 
@@ -212,7 +212,7 @@ flowchart TD
 | **Audio Format** | `AudioFormat.ENCODING_PCM_16BIT` | Standard uncompressed linear PCM supported across 100% of Android devices. |
 | **Frame / Window Size** | 1024 samples (64.0 milliseconds) | Power-of-two window size required for radix-2 Cooley-Tukey FFT. |
 | **Spectral Resolution** | 15.625 Hz per FFT bin ($16000 / 1024$) | Enables precise bin-level isolation for the 100–1000 Hz band (Bins 6–64) and ≤500 Hz low-band (Bins 0–32). |
-| **Acoustic Preprocessing**| `AudioSource.VOICE_RECOGNITION` + `AcousticEchoCanceler` + `NoiseSuppressor` | Strips speaker feedback loop and ambient background hiss while retaining snore transients. |
+| **Acoustic Preprocessing**| `AudioSource.MIC` (`VOICE_RECOGNITION` for Bluetooth SCO) + `AcousticEchoCanceler` | Strips speaker feedback loop while keeping the raw low-frequency snore signal. No `NoiseSuppressor`: speech-tuned suppression removes steady snoring energy. |
 | **Latency per Frame** | ~64 ms read interval + <1 ms compute | Real-time classification on low-end ARM cores without buffer underrun or audio frame drops. |
 
 ---
@@ -242,7 +242,7 @@ sequenceDiagram
     Srv->>Srv: Acquire PowerManager.PARTIAL_WAKE_LOCK (12hr limit)
     Srv->>Srv: Post Ongoing Notification (NOTIFICATION_ID=54321, Channel: MONITORING)
     Srv->>HAL: Initialize AudioRecord (16kHz, Mono, 1024 samples)
-    Srv->>HAL: Attach AcousticEchoCanceler & NoiseSuppressor
+    Srv->>HAL: Attach AcousticEchoCanceler
     Srv->>HAL: AudioRecord.startRecording()
     
     User->>UI: Locks phone / Screen turns off
@@ -271,7 +271,7 @@ sequenceDiagram
     User->>UI: Wakes phone, unlocks and taps "Stop Monitoring"
     UI->>Srv: sendCommand(ACTION_STOP_SERVICE)
     Srv->>HAL: AudioRecord.stop() & release()
-    Srv->>HAL: Release AcousticEchoCanceler & NoiseSuppressor
+    Srv->>HAL: Release AcousticEchoCanceler
     Srv->>Srv: Release WakeLock & stopForeground(STOP_FOREGROUND_REMOVE)
     Srv->>Srv: stopSelf()
     deactivate Srv
