@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
                 themeMode = themeMode,
                 dynamicColor = dynamicColor
             ) {
-                var selectedTab by remember { mutableStateOf(0) }
+                var selectedTab by rememberSaveable { mutableStateOf(0) } // survives rotation (#11)
                 val context = LocalContext.current
                 
                 // Permission Request Logic
@@ -1124,7 +1124,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
     val context = LocalContext.current
     val dateSdf = remember { SimpleDateFormat("EEEE, MMM dd — hh:mm:ss a", Locale.getDefault()) }
 
-    var historyTabFilter by remember { mutableStateOf(0) } // 0 = Episodes, 1 = Error Logs
+    var historyTabFilter by rememberSaveable { mutableStateOf(0) } // 0 = Episodes, 1 = Error Logs
     var showExportDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showClearErrorsDialog by remember { mutableStateOf(false) }
