@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
 
 ### Fixes
 
@@ -8,6 +8,10 @@
 - Upgrades now keep your snoring history: replaced the destructive database migration with a real migration from 1.0.0 (#6).
 - Fixed Settings method cards stretching to a full screen with "Always Active" written one letter per line on narrow screens or larger fonts (#10).
 - Rotating the screen no longer jumps back to the dashboard or loses the history list position (#11).
+
+### Note
+
+- dB readings return to the 1.0.0 scale. If you raised the Sound Volume threshold in 1.1.0 to compensate for the higher readings, lower it again (default: 55 dB).
 
 ## 1.1.0
 
