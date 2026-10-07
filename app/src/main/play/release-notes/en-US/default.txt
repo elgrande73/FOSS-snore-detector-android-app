@@ -1,1 +1,5 @@
-Initial release.
+Bug fixes for 1.1.0:
+• Snoring is detected reliably again and dB readings are back to normal (1.1.0 read ~20 dB too high). If you raised the volume threshold in 1.1.0, lower it again (default 55 dB).
+• App updates now keep your snoring history.
+• Fixed the Settings screen layout on narrow screens and with large fonts.
+• Rotating the screen no longer resets the view.
