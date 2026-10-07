@@ -3564,11 +3564,15 @@ fun ConfigureMethodCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Title takes the remaining width and wraps; the switch/badge keeps its natural size (#10)
                 Text(
                     text = title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
+                    color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
                 if (isToggleable) {
                     Switch(
@@ -3600,7 +3604,9 @@ fun ConfigureMethodCard(
                                 text = "Always Active",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -3617,6 +3623,7 @@ fun ConfigureMethodCard(
             ) {
                 Box(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -3638,7 +3645,10 @@ fun ConfigureMethodCard(
                         text = "Default: $defaultValueLabel",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }

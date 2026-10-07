@@ -6,6 +6,7 @@
 
 - Restored 1.0.0 audio capture for built-in, USB, and wired microphones (raw `MIC` source, no speech noise suppressor). Fixes dB readings ~20 dB too high and snoring no longer being detected (#9, #12). Bluetooth microphones still use `VOICE_RECOGNITION`.
 - Upgrades now keep your snoring history: replaced the destructive database migration with a real migration from 1.0.0 (#6).
+- Fixed Settings method cards stretching to a full screen with "Always Active" written one letter per line on narrow screens or larger fonts (#10).
 - Rotating the screen no longer jumps back to the dashboard or loses the history list position (#11).
 
 ## 1.1.0
