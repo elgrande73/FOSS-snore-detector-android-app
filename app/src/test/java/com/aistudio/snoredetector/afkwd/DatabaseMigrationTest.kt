@@ -64,7 +64,7 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    fun migrate1To2_preservesSnoreEventsAndAddsErrorLogs() = runBlocking {
+    fun migrate1To2_preservesSnoreEventsAndAddsErrorLogs(): Unit = runBlocking {
         createVersion1Database()
 
         val db = Room.databaseBuilder(context, AppDatabase::class.java, dbName)
