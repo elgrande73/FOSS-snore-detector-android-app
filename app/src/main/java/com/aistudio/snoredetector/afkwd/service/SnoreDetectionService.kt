@@ -25,8 +25,10 @@ import com.aistudio.snoredetector.afkwd.MainActivity
 import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.audio.MediaPlaybackDetector
+import com.aistudio.snoredetector.afkwd.audio.SessionRecorder
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
+import com.aistudio.snoredetector.afkwd.data.SessionRecordingStore
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
@@ -69,6 +71,7 @@ class SnoreDetectionService : Service() {
     // Service parameters
     private var isSaveClipsEnabled: Boolean = true
     private var isNotifyOnSnoreEnabled: Boolean = false
+    private var isFullSessionRecordingEnabled: Boolean = false
     private var selectedAudioInputId: Int = -1
     private var selectedAudioInputName: String = ""
     private var currentConfig = DetectionConfig()
@@ -195,6 +198,7 @@ class SnoreDetectionService : Service() {
         intent?.let {
             isSaveClipsEnabled = it.getBooleanExtra("saveAudioClips", true)
             isNotifyOnSnoreEnabled = it.getBooleanExtra("notifyOnSnore", false)
+            isFullSessionRecordingEnabled = it.getBooleanExtra("recordFullSession", false)
             selectedAudioInputId = it.getIntExtra("audioInputId", -1)
             selectedAudioInputName = it.getStringExtra("audioInputName") ?: ""
             
@@ -501,6 +505,23 @@ class SnoreDetectionService : Service() {
             var consecutiveZeroFrames = 0
             var lastPlaybackPollMillis = 0L
 
+            // Per capture, so a change of microphone mid-session starts a new file
+            val sessionRecorder = if (isFullSessionRecordingEnabled) {
+                SessionRecorder(
+                    directory = SessionRecordingStore.directory(applicationContext),
+                    sampleRate = sampleRate,
+                    onFailure = { message, cause ->
+                        ErrorLogger.log(
+                            context = applicationContext,
+                            errorType = "SESSION_RECORDING_ERROR",
+                            message = message,
+                            throwable = cause,
+                            component = "SessionRecorder"
+                        )
+                    }
+                ).also { it.start() }
+            } else null
+
             try {
                 while (isActive && isRecording.get()) {
                     val readResult = try {
@@ -544,6 +565,7 @@ class SnoreDetectionService : Service() {
                     }
 
                     val frameSamples = audioBuffer.copyOf(readResult)
+                    sessionRecorder?.write(frameSamples)
                     
                     // Run signal processing algorithms
                     val result = snoreAnalyzer.analyze(frameSamples, currentConfig)
@@ -719,6 +741,9 @@ class SnoreDetectionService : Service() {
                         }
                 }
             } finally {
+                // First: the suspending database insert below throws once this job is cancelled
+                sessionRecorder?.close()
+
                 if (isSnoringActive && snoreBlocksCount > 0) {
                     val durationSec = (snoreLastDetectedTime - snoreStartTime) / 1000.0
                     if (durationSec >= currentConfig.minDurationSeconds) {

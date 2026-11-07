@@ -415,6 +415,7 @@ graph TD
 | **Live Timeline Decibels**| StateFlow (`List<AmplitudePoint>`) | **Session Scope**: Cleared when a new recording starts. | **Never** |
 | **Snore Incidents (Metrics)**| SQLite (`snore_events` table) | **Persistent**: Retained until user deletes manually or clears app data. | **Only via User-Initiated SAF Export** |
 | **Audio Incident Clips (.wav)**| App Internal Storage (`filesDir/snore_recordings/`)| **Persistent**: Retained until user deletes records or toggles saving off. | **Only via User-Initiated SAF / Share Intent** |
+| **Full-Session Recordings (.wav, opt-in)**| App Internal Storage (`noBackupFilesDir/session_recordings/`, excluded from backups)| **Bounded**: Last 3 kept, oldest deleted when a new recording starts; written by `SessionRecorder` on its own thread, stops below 500 MB free. | **Only via User-Initiated SAF Export** |
 | **System Error Logs** | SQLite (`system_error_logs` table) | **Persistent**: Anonymized local logs for on-device diagnostics. | **Only via User-Initiated Share/Export** |
 | **DSP Preferences** | `SharedPreferences` | **Persistent**: Maintained across app updates. | **Never** |
 

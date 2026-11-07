@@ -5,11 +5,14 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.channels.FileChannel
 
 /**
  * Clean FOSS wave exporter in pure Kotlin for saving snoring audio snippets.
  */
 object WavWriter {
+
+    const val HEADER_SIZE = 44
 
     /**
      * Save raw short PCM buffers into a standard WAV file.
@@ -46,9 +49,22 @@ object WavWriter {
     }
 
     /**
+     * Rewrites the RIFF and data sizes of a WAV file written incrementally, from the file's current
+     * length. Positional writes leave the channel position, and any stream using it, untouched.
+     */
+    fun updateHeaderSizes(channel: FileChannel) {
+        val totalAudioLen = (channel.size() - HEADER_SIZE).toInt()
+        channel.write(littleEndianInt(totalAudioLen + 36), 4L)
+        channel.write(littleEndianInt(totalAudioLen), 40L)
+    }
+
+    private fun littleEndianInt(value: Int): ByteBuffer =
+        ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).apply { flip() }
+
+    /**
      * Write standard RIFF/WAVE header
      */
-    private fun writeHeader(
+    fun writeHeader(
         out: OutputStream,
         channels: Short,
         sampleRate: Int,
