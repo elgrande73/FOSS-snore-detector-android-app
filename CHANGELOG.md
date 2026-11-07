@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- New "Schedule & Auto-Stop" section in Settings (#13): a reminder notification on selected days that starts monitoring with one tap, and an automatic stop at a set time or after a duration. Android doesn't allow apps to turn on the microphone from the background, so monitoring can't start without that tap.
+- The app now sends a notification when a session ends at the 12-hour safety limit.
+
 ## 1.1.1
 
 ### Fixes

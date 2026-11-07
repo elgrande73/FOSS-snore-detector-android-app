@@ -127,6 +127,8 @@ graph TB
 | **`MainActivity`** | Compose / AndroidX | Single-activity container, dynamic permission orchestrator (`RECORD_AUDIO`, `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT`). | Compose UI hierarchy, `ActivityResultContracts` |
 | **`SnoreViewModel`** | ViewModel / Coroutines | Exposes UI state, manages `SharedPreferences` persistence for DSP sliders, coordinates SAF export intents. | `StateFlow`, `viewModelScope`, `SnoreRepository` |
 | **`SnoreDetectionService`** | Foreground Service | Maintains `AudioRecord` read loop, orchestrates WakeLock, controls notification channel, integrates DSP results. | `AudioRecord.read()`, `NotificationManager` |
+| **`ScheduleAlarms` / `ScheduleReceiver`** | AlarmManager | Schedules the start reminder notification and restores it after reboot, update, and clock or time zone changes. | `setExactAndAllowWhileIdle()`, `BroadcastReceiver` |
+| **`ScheduleTime`** | Pure Kotlin | Calculates the next reminder and when a session has to stop, across midnight and daylight saving. | `nextStartMillis()`, `stopPlan()` |
 | **`AudioInputManager`** | Android HAL API | Probes physical microphone endpoints, initiates Bluetooth SCO / `setCommunicationDevice`, handles fallback to built-in mic. | `AudioManager.getDevices()`, `AudioDeviceInfo` |
 | **`MediaPlaybackDetector`**| Android Audio API | Identifies active music/podcast playback on `STREAM_MUSIC` to suspend triggers during sleep-listening. | `AudioPlaybackCallback`, `isMusicActive()` |
 | **`SnoreAnalyzer`** | Pure Kotlin DSP | Performs frame-by-frame 1024-point time-domain and frequency-domain metric extraction and threshold evaluation. | `analyze(shortSamples, config): AnalysisResult` |
@@ -325,6 +327,10 @@ stateDiagram-v2
    `PowerManager.WakeLock` (`PowerManager.PARTIAL_WAKE_LOCK`, tag: `SnoreDetector:WakeLock`) is acquired at session launch with an absolute safety timeout of 12 hours (`12 * 60 * 60 * 1000L`). This prevents CPU sleep when the screen turns off.
 3. **Hardware Routing Resiliency**:
    If a Bluetooth headset or USB adapter disconnects during the night, `AudioInputManager` traps the routing change and falls back to `TYPE_BUILTIN_MIC` without terminating the foreground service.
+4. **Scheduled Start Is a Notification**:
+   A `microphone` foreground service must be started while the app is visible or from a user action on a notification. An alarm does not qualify: Android 14+ throws a `SecurityException`, and Android 11 to 13 start the service without microphone access. The schedule therefore posts a reminder, and tapping it opens `MainActivity`, which starts the service in `onResume()`.
+5. **Automatic Stop**:
+   The service works out its stop moment with `ScheduleTime.stopPlan()` at start and after every settings change, and stops itself no later than 12 hours after the session began. No alarm is involved: the WakeLock keeps the timer running.
 
 ---
 

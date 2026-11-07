@@ -45,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
@@ -115,8 +116,10 @@ import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
+import com.aistudio.snoredetector.afkwd.schedule.ScheduleAlarms
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.ScheduleSettingsCard
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -128,9 +131,12 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
 
     private val viewModel: SnoreViewModel by viewModels()
+    private var startMonitoringOnResume = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Not on rotation or restore: those bring back the reminder's intent, but no new tap
+        startMonitoringOnResume = savedInstanceState == null && ScheduleAlarms.isStartMonitoringIntent(intent)
         enableEdgeToEdge()
         setContent {
             val themeMode by viewModel.themeMode.collectAsState()
@@ -279,6 +285,25 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        startMonitoringOnResume = ScheduleAlarms.isStartMonitoringIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (startMonitoringOnResume) {
+            startMonitoringOnResume = false
+            // Waits for onResume because the microphone service must start while the app is visible
+            val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            if (hasMicPermission && !SnoreDetectionService.isServiceRunning.value) {
+                viewModel.startServiceDetection()
             }
         }
     }
@@ -2492,7 +2517,9 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     var showResetSettingsDialog by remember { mutableStateOf(false) }
 
     var isDspExpanded by rememberSaveable { mutableStateOf(true) }
+    var isScheduleExpanded by rememberSaveable { mutableStateOf(false) }
     var isGeneralExpanded by rememberSaveable { mutableStateOf(false) }
+    val scheduleSettings by viewModel.scheduleSettings.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -2772,6 +2799,23 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     lowFreqRatioThreshold = lowFreqRatioThreshold,
                     minDurationSeconds = minDurationSeconds
                 )
+            }
+        }
+
+        item(key = "section_schedule_header") {
+            SettingsSectionHeader(
+                title = "Schedule & Auto-Stop",
+                subtitle = "Bedtime reminder and automatic stop",
+                icon = Icons.Default.DateRange,
+                expanded = isScheduleExpanded,
+                onToggle = { isScheduleExpanded = !isScheduleExpanded },
+                testTag = "schedule_section_header"
+            )
+        }
+
+        if (isScheduleExpanded) {
+            item(key = "settings_schedule_card") {
+                ScheduleSettingsCard(scheduleSettings, viewModel::updateScheduleSettings)
             }
         }
 
