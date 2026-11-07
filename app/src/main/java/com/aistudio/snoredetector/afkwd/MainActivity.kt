@@ -45,6 +45,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Home
@@ -117,6 +118,7 @@ import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.StatisticsTab
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -234,6 +236,18 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                             NavigationBarItem(
+                                selected = selectedTab == 4,
+                                onClick = { selectedTab = 4 },
+                                label = { Text("Stats", fontWeight = FontWeight.SemiBold) },
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.Default.DateRange,
+                                        contentDescription = "Statistics"
+                                    )
+                                },
+                                modifier = Modifier.testTag("nav_statistics_tab")
+                            )
+                            NavigationBarItem(
                                 selected = selectedTab == 2,
                                 onClick = { selectedTab = 2 },
                                 label = { Text("Settings", fontWeight = FontWeight.SemiBold) },
@@ -275,6 +289,7 @@ class MainActivity : ComponentActivity() {
                                 1 -> HistoryTab(viewModel)
                                 2 -> SettingsTab(viewModel)
                                 3 -> GuideTab()
+                                4 -> StatisticsTab(viewModel)
                             }
                         }
                     }

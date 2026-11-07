@@ -21,6 +21,8 @@ import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ErrorLog
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
+import com.aistudio.snoredetector.afkwd.data.NightStats
+import com.aistudio.snoredetector.afkwd.data.NightSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
@@ -52,6 +54,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     // Central state synchronization of DB SnoreEvents & ErrorLogs
     val hLogs: StateFlow<List<SnoreEvent>>
     val errorLogs: StateFlow<List<ErrorLog>>
+    val nights: StateFlow<List<NightSummary>>
 
     // Media Player state
     private var mediaPlayer: MediaPlayer? = null
@@ -159,7 +162,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val database = AppDatabase.getDatabase(context)
-        repository = SnoreRepository(database.snoreDao(), database.errorLogDao())
+        repository = SnoreRepository(database.snoreDao(), database.errorLogDao(), database.sessionDao())
         
         // Expose db stream directly to view
         hLogs = repository.allEvents.stateIn(
@@ -174,6 +177,11 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+        // Nights for the Statistics tab; a session still recording has no final numbers yet
+        nights = combine(repository.allSessions, SnoreDetectionService.activeSessionId) { sessions, activeId ->
+            NightStats.summarize(sessions.filter { it.id != activeId })
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
         // Enumerate currently available audio input sources
         refreshAvailableInputDevices()
@@ -457,7 +465,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
                     Log.e("SnoreVM", "Failed to delete file $path", e)
                 }
             }
-            repository.deleteEventById(event.id)
+            repository.deleteEventById(event.id, event.sessionId)
         }
     }
 
@@ -472,7 +480,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e("SnoreVM", "Failed to clear audio files", e)
             }
-            repository.clearHistory()
+            repository.clearHistory(SnoreDetectionService.activeSessionId.value)
         }
     }
 
@@ -621,6 +629,25 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Export the one-row-per-night summary to a user-chosen Document Uri.
+     */
+    fun exportNightSummaries(targetUri: Uri, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessions = repository.getAllSessions()
+            val result = AudioExportManager.exportNightCsvToUri(context, NightStats.summarize(sessions), targetUri)
+            withContext(Dispatchers.Main) { onComplete(result) }
+        }
+    }
+
+    /** Nightly CSV for a ZIP export: every night, or only the selected events' nights. */
+    private suspend fun nightlyCsvFor(events: List<SnoreEvent>): String {
+        val isSubset = _isMultiSelectMode.value && _selectedEventIds.value.isNotEmpty()
+        val sessionIds = events.mapNotNull { it.sessionId }.toSet()
+        val sessions = repository.getAllSessions().filter { !isSubset || it.id in sessionIds }
+        return AudioExportManager.generateNightCsv(NightStats.summarize(sessions))
+    }
+
+    /**
      * Export audio recordings or full bundle (CSV + audio) into a ZIP archive.
      */
     fun exportZipBundle(
@@ -641,6 +668,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
                     destinationUri = targetUri,
                     includeCsv = includeCsv,
                     includeAudio = includeAudio,
+                    nightlyCsv = if (includeCsv) nightlyCsvFor(events) else null,
                     onProgress = { current, total ->
                         _exportProgressText.value = "Exporting recording $current of $total..."
                     }

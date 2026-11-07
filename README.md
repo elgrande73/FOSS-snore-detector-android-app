@@ -33,6 +33,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
 * **Audio Clip Capturing**
   Option to record and save short `.wav` clips of snoring episodes for playback directly within the app history.
 
+* **Nightly Score & Trends**
+  A snore score for each night with its formula shown in the app, a chart over weeks and months, and a comparison of two 30-day periods. It summarises recorded sound and is not a medical diagnosis.
+
 * **Data Export & Sovereignty**
   Export your detection history and recordings as a complete `.zip` bundle (CSV + WAV files) or CSV format for personal analysis or medical consultation.
 

@@ -64,6 +64,7 @@ graph TB
         HistoryTab["HistoryTab<br/>(Timeline, Waveform Playback, ZIP Export)"]
         SettingsTab["SettingsTab<br/>(DSP Thresholds & Hardware Selectors)"]
         GuideTab["GuideTab<br/>(Acoustic Help & Device Placement)"]
+        StatisticsTab["StatisticsTab<br/>(Nightly Score, Trend Chart, Period Comparison)"]
     end
 
     subgraph ViewModel_Layer ["State & Orchestration Layer"]
@@ -87,12 +88,13 @@ graph TB
         RoomDB["AppDatabase (Room SQLite v3)"]
         SnoreDao["SnoreDao<br/>(snore_events CRUD)"]
         ErrorLogDao["ErrorLogDao<br/>(system_error_logs CRUD)"]
+        SessionDao["SessionDao<br/>(monitoring_sessions CRUD)"]
         DiskFiles["Local Filesystem Cache<br/>(context.filesDir/snore_recordings/*.wav)"]
         ExportMgr["AudioExportManager<br/>(Storage Access Framework & ZipOutputStream)"]
     end
 
-    MainActivity --> DashboardTab & HistoryTab & SettingsTab & GuideTab
-    DashboardTab & HistoryTab & SettingsTab & GuideTab --> SnoreViewModel
+    MainActivity --> DashboardTab & HistoryTab & StatisticsTab & SettingsTab & GuideTab
+    DashboardTab & HistoryTab & StatisticsTab & SettingsTab & GuideTab --> SnoreViewModel
     SnoreViewModel --> Repo
     SnoreViewModel -.->|Observes Singletons| Service
     Service --> InputMgr
@@ -102,8 +104,8 @@ graph TB
     Service --> WavOut
     WavOut --> DiskFiles
     Service --> Repo
-    Repo --> SnoreDao & ErrorLogDao
-    SnoreDao & ErrorLogDao --> RoomDB
+    Repo --> SnoreDao & ErrorLogDao & SessionDao
+    SnoreDao & ErrorLogDao & SessionDao --> RoomDB
     SnoreViewModel --> ExportMgr
     ExportMgr --> DiskFiles & RoomDB
 
@@ -113,11 +115,11 @@ graph TB
     classDef dsp fill:#701a75,stroke:#f472b6,color:#ffffff;
     classDef data fill:#312e81,stroke:#a5b4fc,color:#ffffff;
     
-    class MainActivity,DashboardTab,HistoryTab,SettingsTab,GuideTab ui;
+    class MainActivity,DashboardTab,HistoryTab,StatisticsTab,SettingsTab,GuideTab ui;
     class SnoreViewModel vm;
     class Service,InputMgr,MediaDet srv;
     class Analyzer,FFTEngine,WavOut dsp;
-    class Repo,RoomDB,SnoreDao,ErrorLogDao,DiskFiles,ExportMgr data;
+    class Repo,RoomDB,SnoreDao,ErrorLogDao,SessionDao,DiskFiles,ExportMgr data;
 ```
 
 ### Component Responsibilities & Interfaces
@@ -133,6 +135,8 @@ graph TB
 | **`FFT`** | In-place Algorithm | Cooley-Tukey Radix-2 Fast Fourier Transform computing discrete frequency magnitudes across 512 frequency bins. | `fft(real[], imag[])` |
 | **`WavWriter`** | Java I/O | Encodes 16-bit 16kHz PCM frames into RIFF/WAVE header and data chunks. | `saveWavFile(File, sampleRate, List<ShortArray>)` |
 | **`AppDatabase` / `SnoreDao`** | Room / SQLite v3 | Local offline database storing individual snore events with full acoustic metrics and diagnostic error logs. | Room `@Dao`, `Flow<List<SnoreEvent>>` |
+| **`SessionDao` / `SessionTracker`** | Room / Pure Kotlin | Persist one row per monitoring run, inserted at capture start and refreshed every 60 s, so an unclean end loses at most a minute. The tracker measures monitored time and background level. | `refreshSession()`, `onFrame()` |
+| **`SnoreScore` / `NightStats`** | Pure Kotlin | Fixed, documented 0–100 score; noon-to-noon night grouping; moving average, period comparison, change markers. Derived from stored sessions on read, so the score is not stored. | `calculate()`, `summarize()` |
 | **`AudioExportManager`**| Java Zip / SAF | Streams database records and audio files into standardized ZIP and CSV formats via `DocumentUri`. | `ZipOutputStream`, `FileProvider` |
 
 ---
@@ -384,7 +388,7 @@ graph TD
     end
 
     subgraph Export_Boundary ["3. Export Boundary (Storage Access Framework)"]
-        ZIP_Archive["Exported ZIP Package<br/>• snoring_events.csv<br/>• audio/SnoreDetector_*.wav"]
+        ZIP_Archive["Exported ZIP Package<br/>• snoring_events.csv<br/>• nightly_summaries.csv<br/>• audio/SnoreDetector_*.wav"]
         CSV_File["Exported CSV File<br/>• Timestamp, Datetime, Duration, dB, Metrics"]
         TXT_Log["Exported Error Log (.txt)"]
     end
@@ -415,6 +419,7 @@ graph TD
 | **Live Timeline Decibels**| StateFlow (`List<AmplitudePoint>`) | **Session Scope**: Cleared when a new recording starts. | **Never** |
 | **Snore Incidents (Metrics)**| SQLite (`snore_events` table) | **Persistent**: Retained until user deletes manually or clears app data. | **Only via User-Initiated SAF Export** |
 | **Audio Incident Clips (.wav)**| App Internal Storage (`filesDir/snore_recordings/`)| **Persistent**: Retained until user deletes records or toggles saving off. | **Only via User-Initiated SAF / Share Intent** |
+| **Monitoring Sessions** | SQLite (`monitoring_sessions` table) | **Persistent**: Cleared with the snoring history. Deleting an event recalculates its session. Sessions rebuilt from pre-v3 events have no monitored time and therefore no score. | **Only via User-Initiated SAF Export** |
 | **System Error Logs** | SQLite (`system_error_logs` table) | **Persistent**: Anonymized local logs for on-device diagnostics. | **Only via User-Initiated Share/Export** |
 | **DSP Preferences** | `SharedPreferences` | **Persistent**: Maintained across app updates. | **Never** |
 

@@ -21,28 +21,36 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.aistudio.snoredetector.afkwd.BuildConfig
 import com.aistudio.snoredetector.afkwd.MainActivity
 import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.audio.MediaPlaybackDetector
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
+import com.aistudio.snoredetector.afkwd.data.MonitoringSession
+import com.aistudio.snoredetector.afkwd.data.SessionProgress
+import com.aistudio.snoredetector.afkwd.data.SessionTracker
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
+import com.aistudio.snoredetector.afkwd.data.toSnapshot
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import com.aistudio.snoredetector.afkwd.dsp.AnalysisResult
 import com.aistudio.snoredetector.afkwd.dsp.DetectionConfig
 import com.aistudio.snoredetector.afkwd.dsp.SnoreAnalyzer
 import com.aistudio.snoredetector.afkwd.dsp.WavWriter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -74,6 +82,10 @@ class SnoreDetectionService : Service() {
     private var currentConfig = DetectionConfig()
     private var startTimeMillis: Long = 0L
 
+    // The stored session spans capture restarts, so it belongs to the service, not the read loop
+    private val sessionTracker = SessionTracker()
+    @Volatile private var sessionId: Long? = null
+
     companion object {
         private const val TAG = "SnoreService"
 
@@ -96,6 +108,12 @@ class SnoreDetectionService : Service() {
         // Duration of background operation limit: 12 Hours
         private const val LIMIT_DURATION_MS = 12 * 60 * 60 * 1000L
 
+        // How much of a session can be lost if the process dies without a clean stop
+        private const val SESSION_CHECKPOINT_MS = 60 * 1000L
+
+        // Outlives the service: the final session update runs after onDestroy cancels serviceScope
+        private val sessionCloseScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
         // Singleton Flows for real-time Dashboard UI consumption
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning = _isServiceRunning.asStateFlow()
@@ -105,6 +123,9 @@ class SnoreDetectionService : Service() {
 
         private val _sessionEventCount = MutableStateFlow(0)
         val sessionEventCount = _sessionEventCount.asStateFlow()
+
+        private val _activeSessionId = MutableStateFlow<Long?>(null)
+        val activeSessionId = _activeSessionId.asStateFlow()
 
         private val _liveAnalysis = MutableStateFlow<AnalysisResult?>(null)
         val liveAnalysis = _liveAnalysis.asStateFlow()
@@ -145,7 +166,7 @@ class SnoreDetectionService : Service() {
         
         // Initialize local Room repository
         val database = AppDatabase.getDatabase(applicationContext)
-        repository = SnoreRepository(database.snoreDao(), database.errorLogDao())
+        repository = SnoreRepository(database.snoreDao(), database.errorLogDao(), database.sessionDao())
 
         // Acquire WakeLock to hold CPU running continuously overnight
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -500,8 +521,11 @@ class SnoreDetectionService : Service() {
             var diagnosticFrameCount = 0
             var consecutiveZeroFrames = 0
             var lastPlaybackPollMillis = 0L
+            var lastSessionCheckpointMillis = System.currentTimeMillis()
 
             try {
+                ensureSessionStarted()
+
                 while (isActive && isRecording.get()) {
                     val readResult = try {
                         record.read(audioBuffer, 0, audioBuffer.size)
@@ -555,6 +579,17 @@ class SnoreDetectionService : Service() {
                     // If media playback is active, prevent snoring triggers while keeping live decibel metering active
                     val effectiveIsSnoring = if (isMediaActive) false else result.isSnoring
                     val effectiveResult = if (isMediaActive) result.copy(isSnoring = false) else result
+
+                    sessionTracker.onFrame(
+                        durationMs = readResult * 1000.0 / sampleRate,
+                        db = result.db,
+                        isSnoring = effectiveIsSnoring,
+                        isPaused = isMediaActive || !hasNonZeroAudio
+                    )
+                    if (currentMillis - lastSessionCheckpointMillis >= SESSION_CHECKPOINT_MS) {
+                        lastSessionCheckpointMillis = currentMillis
+                        launch { saveSessionProgress() }
+                    }
 
                     // Post real-time analytics to dashboard flow
                     _liveAnalysis.value = effectiveResult
@@ -695,7 +730,8 @@ class SnoreDetectionService : Service() {
                                             meanZcr = avgZcr,
                                             meanBandEnergy = avgBand,
                                             meanLowFreqRatio = avgLowFreq,
-                                            audioFilePath = savedAudioPath
+                                            audioFilePath = savedAudioPath,
+                                            sessionId = sessionId
                                         )
                                         
                                         launch {
@@ -756,9 +792,11 @@ class SnoreDetectionService : Service() {
                             meanZcr = avgZcr,
                             meanBandEnergy = avgBand,
                             meanLowFreqRatio = avgLowFreq,
-                            audioFilePath = savedAudioPath
+                            audioFilePath = savedAudioPath,
+                            sessionId = sessionId
                         )
-                        repository.insertEvent(event)
+                        // A stop cancels this job, and a plain suspend call here would drop the event
+                        withContext(NonCancellable) { repository.insertEvent(event) }
                         _sessionEventCount.value = _sessionEventCount.value + 1
                     }
                 }
@@ -781,6 +819,71 @@ class SnoreDetectionService : Service() {
                 }
                 Log.d(TAG, "Record thread loop finished & hardware released safely")
             }
+        }
+    }
+
+    private suspend fun ensureSessionStarted() {
+        if (sessionId != null) return
+        try {
+            val id = repository.startSession(
+                MonitoringSession(
+                    startTime = startTimeMillis,
+                    endTime = System.currentTimeMillis(),
+                    monitoredMinutes = 0.0,
+                    appVersion = BuildConfig.VERSION_NAME,
+                    detectionSettings = currentConfig.toSnapshot()
+                )
+            )
+            sessionId = id
+            _activeSessionId.value = id
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Losing the session summary must not stop the night's recording
+            Log.e(TAG, "Failed to start monitoring session", e)
+            ErrorLogger.log(
+                context = applicationContext,
+                errorType = "SESSION_SAVE_ERROR",
+                message = "Failed to create monitoring session: ${e.message}",
+                throwable = e,
+                component = "SnoreDetectionService"
+            )
+        }
+    }
+
+    private suspend fun saveSessionProgress() {
+        val id = sessionId ?: return
+        try {
+            repository.updateSession(
+                id,
+                SessionProgress(
+                    endTime = System.currentTimeMillis(),
+                    monitoredMinutes = sessionTracker.monitoredMinutes,
+                    backgroundDb = sessionTracker.backgroundDb,
+                    detectionSettings = currentConfig.toSnapshot()
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save monitoring session", e)
+            ErrorLogger.log(
+                context = applicationContext,
+                errorType = "SESSION_SAVE_ERROR",
+                message = "Failed to save monitoring session: ${e.message}",
+                throwable = e,
+                component = "SnoreDetectionService"
+            )
+        }
+    }
+
+    /** Waits for [captureJob] so that the event flushed by its finally block is counted. */
+    private fun closeSession(captureJob: Job?) {
+        sessionCloseScope.launch {
+            captureJob?.join()
+            val id = sessionId ?: return@launch
+            saveSessionProgress()
+            _activeSessionId.compareAndSet(id, null)
         }
     }
 
@@ -1022,7 +1125,9 @@ class SnoreDetectionService : Service() {
         Log.d(TAG, "Service being destroyed")
         mediaPlaybackDetector?.stopMonitoring()
         mediaPlaybackDetector = null
+        val captureJob = recordingJob
         stopAudioCapture()
+        closeSession(captureJob)
         releaseAudioEffects()
         AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
 

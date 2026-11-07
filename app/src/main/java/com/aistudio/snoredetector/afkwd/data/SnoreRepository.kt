@@ -9,23 +9,39 @@ import kotlinx.coroutines.flow.emptyFlow
  */
 class SnoreRepository(
     private val snoreDao: SnoreDao,
-    private val errorLogDao: ErrorLogDao? = null
+    private val errorLogDao: ErrorLogDao? = null,
+    private val sessionDao: SessionDao? = null
 ) {
 
     val allEvents: Flow<List<SnoreEvent>> = snoreDao.getAllEvents()
     val allErrorLogs: Flow<List<ErrorLog>> = errorLogDao?.getAllLogs() ?: emptyFlow()
+    val allSessions: Flow<List<MonitoringSession>> = sessionDao?.getAllSessions() ?: emptyFlow()
 
     suspend fun insertEvent(event: SnoreEvent): Long {
         return snoreDao.insertEvent(event)
     }
 
-    suspend fun deleteEventById(id: Int) {
+    /** Pass the event's [sessionId] so the session's summary and score stop counting it. */
+    suspend fun deleteEventById(id: Int, sessionId: Long? = null) {
         snoreDao.deleteEventById(id)
+        if (sessionId != null) sessionDao?.refreshSession(sessionId, null)
     }
 
-    suspend fun clearHistory() {
+    /** Clears events and sessions; [activeSessionId] survives so the running night still saves. */
+    suspend fun clearHistory(activeSessionId: Long? = null) {
         snoreDao.deleteAllEvents()
+        sessionDao?.deleteSessionsExcept(activeSessionId)
+        if (activeSessionId != null) sessionDao?.refreshSession(activeSessionId, null)
     }
+
+    suspend fun startSession(session: MonitoringSession): Long? = sessionDao?.insertSession(session)
+
+    /** Stores the running totals; also used for the final update when the session ends. */
+    suspend fun updateSession(id: Long, progress: SessionProgress) {
+        sessionDao?.refreshSession(id, progress)
+    }
+
+    suspend fun getAllSessions(): List<MonitoringSession> = sessionDao?.getAllSessionsOnce() ?: emptyList()
 
     suspend fun insertErrorLog(log: ErrorLog): Long {
         return try {
