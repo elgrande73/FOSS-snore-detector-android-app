@@ -117,6 +117,8 @@ import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.SetupCheckCard
+import com.aistudio.snoredetector.afkwd.ui.StopSetupCheckWhenLeaving
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -2494,12 +2496,18 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     var isDspExpanded by rememberSaveable { mutableStateOf(true) }
     var isGeneralExpanded by rememberSaveable { mutableStateOf(false) }
 
+    StopSetupCheckWhenLeaving(onLeave = viewModel.setupCheck::stop)
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item(key = "settings_setup_check") {
+            SetupCheckCard(viewModel)
+        }
+
         // =========================================================================
         // SECTION 1: DSP Acoustics & Detection Settings (Expandable Drop-Down)
         // =========================================================================
