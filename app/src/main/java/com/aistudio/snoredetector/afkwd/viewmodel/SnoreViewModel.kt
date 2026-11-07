@@ -18,6 +18,8 @@ import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
+import com.aistudio.snoredetector.afkwd.data.BackupManager
+import com.aistudio.snoredetector.afkwd.data.BackupResult
 import com.aistudio.snoredetector.afkwd.data.ErrorLog
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
@@ -45,7 +47,8 @@ import java.util.Locale
 class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
-    private val prefs = context.getSharedPreferences("snore_detector_preferences", Context.MODE_PRIVATE)
+    // A new setting must also be added to the lists in BackupManager to survive a backup.
+    private val prefs = context.getSharedPreferences(BackupManager.PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val repository: SnoreRepository
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
@@ -97,6 +100,10 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _exportSummary = MutableStateFlow<ExportSummary?>(null)
     val exportSummary = _exportSummary.asStateFlow()
+
+    // Full backup & restore progress; the Settings tab blocks input while this is non-null
+    private val _backupProgressText = MutableStateFlow<String?>(null)
+    val backupProgressText = _backupProgressText.asStateFlow()
 
     // Threshold Config State flows
     // Amplitude dB criterion is mandatory and always active (cannot be disabled)
@@ -698,6 +705,83 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
             )
             null
         }
+    }
+
+    // --- FULL BACKUP & RESTORE ---
+
+    /**
+     * Save a restorable backup of history, error logs, settings and optionally recordings.
+     */
+    fun exportBackup(targetUri: Uri, includeRecordings: Boolean, onComplete: (BackupResult) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupProgressText.value = "Creating backup..."
+            val result = BackupManager.exportBackupToUri(context, targetUri, includeRecordings) { current, total ->
+                _backupProgressText.value = "Backing up entry $current of $total..."
+            }
+            if (!result.success) {
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "BACKUP_ERROR",
+                    message = "Failed to create backup: ${result.errorMessage}",
+                    component = "BackupManager"
+                )
+            }
+            withContext(Dispatchers.Main) {
+                _backupProgressText.value = null
+                onComplete(result)
+            }
+        }
+    }
+
+    /**
+     * Replace history, error logs, recordings and settings with a backup, if the file is valid.
+     * Refused during detection, because the running session would lose its events and clips.
+     */
+    fun restoreBackup(sourceUri: Uri, onComplete: (BackupResult) -> Unit) {
+        if (SnoreDetectionService.isServiceRunning.value) {
+            onComplete(BackupResult(false, errorMessage = "Stop detection before restoring a backup."))
+            return
+        }
+        stopAudio()
+        viewModelScope.launch(Dispatchers.IO) {
+            _backupProgressText.value = "Checking backup..."
+            val result = BackupManager.restoreBackupFromUri(context, sourceUri) { recordings ->
+                _backupProgressText.value = "Reading recording $recordings..."
+            }
+            if (!result.success) {
+                ErrorLogger.log(
+                    context = context,
+                    errorType = "RESTORE_ERROR",
+                    message = "Backup was not restored: ${result.errorMessage}",
+                    component = "BackupManager"
+                )
+            }
+            withContext(Dispatchers.Main) {
+                if (result.success) {
+                    reloadSettingsFromPrefs()
+                }
+                _backupProgressText.value = null
+                onComplete(result)
+            }
+        }
+    }
+
+    private fun reloadSettingsFromPrefs() {
+        _rmsDbThreshold.value = prefs.getFloat("rmsDbThreshold", 55.0f)
+        _useZcr.value = prefs.getBoolean("useZcr", true)
+        _zcrThreshold.value = prefs.getFloat("zcrThreshold", 0.15f)
+        _useBandEnergy.value = prefs.getBoolean("useBandEnergy", true)
+        _bandEnergyThreshold.value = prefs.getFloat("bandEnergyThreshold", 0.015f)
+        _useLowFreqRatio.value = prefs.getBoolean("useLowFreqRatio", true)
+        _lowFreqRatioThreshold.value = prefs.getFloat("lowFreqRatioThreshold", 0.65f)
+        _minDurationSeconds.value = prefs.getFloat("minDurationSeconds", 1.0f)
+        _saveAudioClips.value = prefs.getBoolean("saveAudioClips", true)
+        _notifyOnSnore.value = prefs.getBoolean("notifyOnSnore", false)
+        _ignoreDuringMediaPlayback.value = prefs.getBoolean("ignoreDuringMediaPlayback", true)
+        _themeMode.value = com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.valueOf(
+            prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
+        )
+        _dynamicColor.value = prefs.getBoolean("dynamicColor", true)
     }
 
     // --- TIMELINE OFFLINE PERSISTENCE ---

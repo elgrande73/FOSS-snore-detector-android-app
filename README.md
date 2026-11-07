@@ -34,7 +34,7 @@ Designed from the ground up for privacy and performance, all digital signal proc
   Option to record and save short `.wav` clips of snoring episodes for playback directly within the app history.
 
 * **Data Export & Sovereignty**
-  Export your detection history and recordings as a complete `.zip` bundle (CSV + WAV files) or CSV format for personal analysis or medical consultation.
+  Export your detection history and recordings as a complete `.zip` bundle (CSV + WAV files) or CSV format for personal analysis or medical consultation. A full backup (history, settings and optionally recordings) saves to a `.zip` file you can restore after a reinstall or on a new phone. Android's cloud backup only ever receives your settings.
 
 * **Modern Material 3 UI**
   Built with Jetpack Compose following the Sleek Interface theme, edge-to-edge layout, and dark/light adaptive design.
