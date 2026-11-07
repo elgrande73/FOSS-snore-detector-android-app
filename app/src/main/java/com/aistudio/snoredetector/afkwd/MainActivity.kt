@@ -117,6 +117,7 @@ import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.SessionRecordingCard
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -3053,6 +3054,11 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         )
                     }
                 }
+            }
+
+            // Opt-in recording of the complete session
+            item(key = "settings_session_recording") {
+                SessionRecordingCard(viewModel)
             }
 
             // Real-Time Snoring Event Notifications toggle (for smartwatches / Gadgetbridge / companion devices)

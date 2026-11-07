@@ -33,6 +33,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
 * **Audio Clip Capturing**
   Option to record and save short `.wav` clips of snoring episodes for playback directly within the app history.
 
+* **Full-Session Recording (Optional)**
+  Off by default. Save the complete audio of a session (about 115 MB per hour) to analyse it later and tune the detector. Only the last 3 recordings are kept on the device; save the ones you need as `.wav`.
+
 * **Data Export & Sovereignty**
   Export your detection history and recordings as a complete `.zip` bundle (CSV + WAV files) or CSV format for personal analysis or medical consultation.
 

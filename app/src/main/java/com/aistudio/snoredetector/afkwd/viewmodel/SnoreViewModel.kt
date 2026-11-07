@@ -21,6 +21,8 @@ import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ErrorLog
 import com.aistudio.snoredetector.afkwd.data.ErrorLogger
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
+import com.aistudio.snoredetector.afkwd.data.SessionRecording
+import com.aistudio.snoredetector.afkwd.data.SessionRecordingStore
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
@@ -133,6 +135,15 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _notifyOnSnore = MutableStateFlow(prefs.getBoolean("notifyOnSnore", false))
     val notifyOnSnore = _notifyOnSnore.asStateFlow()
 
+    private val _recordFullSession = MutableStateFlow(prefs.getBoolean("recordFullSession", false))
+    val recordFullSession = _recordFullSession.asStateFlow()
+
+    private val _sessionRecordings = MutableStateFlow<List<SessionRecording>>(emptyList())
+    val sessionRecordings = _sessionRecordings.asStateFlow()
+
+    private val _sessionStorageFreeBytes = MutableStateFlow(0L)
+    val sessionStorageFreeBytes = _sessionStorageFreeBytes.asStateFlow()
+
     private val _ignoreDuringMediaPlayback = MutableStateFlow(prefs.getBoolean("ignoreDuringMediaPlayback", true))
     val ignoreDuringMediaPlayback = _ignoreDuringMediaPlayback.asStateFlow()
 
@@ -223,6 +234,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         val intent = Intent(context, SnoreDetectionService::class.java).apply {
             putExtra("saveAudioClips", _saveAudioClips.value)
             putExtra("notifyOnSnore", _notifyOnSnore.value)
+            putExtra("recordFullSession", _recordFullSession.value)
             putExtra("audioInputId", _selectedAudioInputId.value)
             putExtra("audioInputName", _selectedAudioInputName.value)
             putExtra("useRms", _useRms.value)
@@ -357,6 +369,12 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("saveAudioClips", value).apply()
     }
 
+    /** Takes effect from the next session; the card blocks changes while monitoring. */
+    fun updateRecordFullSession(value: Boolean) {
+        _recordFullSession.value = value
+        prefs.edit().putBoolean("recordFullSession", value).apply()
+    }
+
     fun updateIgnoreDuringMediaPlayback(value: Boolean) {
         _ignoreDuringMediaPlayback.value = value
         prefs.edit().putBoolean("ignoreDuringMediaPlayback", value).apply()
@@ -392,6 +410,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateIgnoreDuringMediaPlayback(defaultConfig.ignoreDuringMediaPlayback)
         updateSaveAudioClips(true)
         updateNotifyOnSnore(false)
+        updateRecordFullSession(false)
         updateSelectedAudioInput(AudioInputDevice.DEFAULT_DEVICE)
         updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
         updateDynamicColor(true)
@@ -473,6 +492,33 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e("SnoreVM", "Failed to clear audio files", e)
             }
             repository.clearHistory()
+            deleteAllSessionRecordings()
+        }
+    }
+
+    // --- FULL-SESSION RECORDINGS ---
+
+    fun refreshSessionRecordings() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _sessionRecordings.value = SessionRecordingStore.list(SessionRecordingStore.directory(context))
+            _sessionStorageFreeBytes.value = context.noBackupFilesDir.usableSpace
+        }
+    }
+
+    fun deleteSessionRecording(recording: SessionRecording) {
+        // While monitoring, the file may be the one being written
+        if (SnoreDetectionService.isServiceRunning.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            recording.file.delete()
+            refreshSessionRecordings()
+        }
+    }
+
+    private fun deleteAllSessionRecordings() {
+        if (SnoreDetectionService.isServiceRunning.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            SessionRecordingStore.deleteAll(SessionRecordingStore.directory(context))
+            refreshSessionRecordings()
         }
     }
 
