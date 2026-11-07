@@ -27,6 +27,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -2416,10 +2418,7 @@ fun SettingsSectionHeader(
                     )
                 }
                 Column {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    TitleBadgeRow {
                         Text(
                             text = title,
                             fontSize = 16.sp,
@@ -2456,6 +2455,40 @@ fun SettingsSectionHeader(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+/** Keeps a title and its badge on one line when they fit, and moves the badge below when they don't (#10). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TitleBadgeRow(
+    modifier: Modifier = Modifier,
+    horizontalArrangement: Arrangement.Horizontal = Arrangement.spacedBy(8.dp),
+    content: @Composable () -> Unit
+) {
+    FlowRow(
+        modifier = modifier,
+        horizontalArrangement = horizontalArrangement,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        content()
+    }
+}
+
+@Composable
+internal fun SettingTitleWithDefault(title: String, defaultLabel: String) {
+    TitleBadgeRow {
+        Text(
+            text = title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = defaultLabel,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -2723,22 +2756,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Pause Triggers During Media Playback",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "(Default: Enabled)",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            SettingTitleWithDefault(title = "Pause Triggers During Media Playback", defaultLabel = "(Default: Enabled)")
                             Text(
                                 text = "Automatically suppress false snoring triggers while podcasts, audiobooks, or music are playing on the device (e.g. while falling asleep). Snoring detection resumes automatically the moment media stops.",
                                 fontSize = 11.sp,
@@ -3020,22 +3038,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Save Audio Recordings (.WAV)",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "(Default: Enabled)",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            SettingTitleWithDefault(title = "Save Audio Recordings (.WAV)", defaultLabel = "(Default: Enabled)")
                             Text(
                                 text = "Extract and persist short audio clippings of detected snoring incidents locally to play back in history logs.",
                                 fontSize = 11.sp,
@@ -3071,22 +3074,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Real-Time Snore Notifications",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "(Default: Disabled)",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            SettingTitleWithDefault(title = "Real-Time Snore Notifications", defaultLabel = "(Default: Disabled)")
                             Text(
                                 text = "Send an immediate high-priority Android notification when a snoring incident is confirmed. Can be used with compatible notification or companion devices to provide additional alerts.",
                                 fontSize = 11.sp,
@@ -3368,11 +3356,7 @@ fun DspFormulaCard(
             .testTag("dsp_formula_card")
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            TitleBadgeRow(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "Active Detection Formula",
                     fontSize = 15.sp,
@@ -3614,16 +3598,13 @@ fun ConfigureMethodCard(
             }
 
             // Direction and type badge + Default value badge
-            Row(
+            TitleBadgeRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(top = 4.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(4.dp))
                         .background(
                             if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -3647,8 +3628,7 @@ fun ConfigureMethodCard(
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.padding(start = 8.dp)
+                        softWrap = false
                     )
                 }
             }
