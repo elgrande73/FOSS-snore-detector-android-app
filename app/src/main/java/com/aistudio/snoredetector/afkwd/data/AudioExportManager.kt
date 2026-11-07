@@ -53,25 +53,30 @@ object AudioExportManager {
     /**
      * Generates standard CSV text for a list of snore events.
      * References the deterministic audio filename in the AudioClip column.
+     * Session_Start holds the start of the event's session: comment lines are not part of the
+     * CSV format and break many parsers, while a column lets tools filter or group by session.
      */
     fun generateCsvContent(events: List<SnoreEvent>): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
         val csvBuilder = StringBuilder()
-        csvBuilder.append("Timestamp,Datetime,Duration_Seconds,dB_Level,Max_RMS,Mean_ZCR,Mean_BandEnergy,Mean_LowFreqRatio,AudioClip\n")
+        csvBuilder.append("Timestamp,Datetime,Duration_Seconds,dB_Level,Max_RMS,Mean_ZCR,Mean_BandEnergy,Mean_LowFreqRatio,AudioClip,Session_Start\n")
 
         val usedFileNames = mutableMapOf<String, Int>()
 
-        for (e in events) {
-            val formattedDate = sdf.format(Date(e.timestamp))
-            val clipName = if (e.audioFilePath != null && File(e.audioFilePath).exists()) {
-                val base = formatAudioFileName(e.timestamp, e.id)
-                val count = usedFileNames.getOrDefault(base, 0)
-                usedFileNames[base] = count + 1
-                if (count == 0) base else formatAudioFileName(e.timestamp, e.id, count)
-            } else {
-                "None"
+        for (session in groupEventsIntoSessions(events)) {
+            val sessionStart = sdf.format(Date(session.startMillis))
+            for (e in session.events) {
+                val formattedDate = sdf.format(Date(e.timestamp))
+                val clipName = if (e.audioFilePath != null && File(e.audioFilePath).exists()) {
+                    val base = formatAudioFileName(e.timestamp, e.id)
+                    val count = usedFileNames.getOrDefault(base, 0)
+                    usedFileNames[base] = count + 1
+                    if (count == 0) base else formatAudioFileName(e.timestamp, e.id, count)
+                } else {
+                    "None"
+                }
+                csvBuilder.append("${e.timestamp},\"$formattedDate\",${e.durationSeconds},${e.maxDb},${e.maxRms},${e.meanZcr},${e.meanBandEnergy},${e.meanLowFreqRatio},\"$clipName\",\"$sessionStart\"\n")
             }
-            csvBuilder.append("${e.timestamp},\"$formattedDate\",${e.durationSeconds},${e.maxDb},${e.maxRms},${e.meanZcr},${e.meanBandEnergy},${e.meanLowFreqRatio},\"$clipName\"\n")
         }
         return csvBuilder.toString()
     }

@@ -385,7 +385,7 @@ graph TD
 
     subgraph Export_Boundary ["3. Export Boundary (Storage Access Framework)"]
         ZIP_Archive["Exported ZIP Package<br/>• snoring_events.csv<br/>• audio/SnoreDetector_*.wav"]
-        CSV_File["Exported CSV File<br/>• Timestamp, Datetime, Duration, dB, Metrics"]
+        CSV_File["Exported CSV File<br/>• Timestamp, Datetime, Duration, dB, Metrics, Session_Start"]
         TXT_Log["Exported Error Log (.txt)"]
     end
 

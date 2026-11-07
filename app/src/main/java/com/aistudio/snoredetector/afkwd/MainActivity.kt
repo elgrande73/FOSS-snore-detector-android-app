@@ -112,11 +112,13 @@ import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ExportSummary
+import com.aistudio.snoredetector.afkwd.data.groupEventsIntoSessions
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.sessionItems
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -1132,6 +1134,8 @@ fun HistoryTab(viewModel: SnoreViewModel) {
     var pendingExportErrorLog by remember { mutableStateOf<ErrorLog?>(null) }
     var selectedErrorLogForDetails by remember { mutableStateOf<ErrorLog?>(null) }
 
+    val sessions = remember(events) { groupEventsIntoSessions(events) }
+
     // Active subset for export (either selected items or all items)
     val activeExportEvents = remember(events, isMultiSelectMode, selectedEventIds) {
         if (isMultiSelectMode && selectedEventIds.isNotEmpty()) {
@@ -1449,7 +1453,7 @@ fun HistoryTab(viewModel: SnoreViewModel) {
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(events, key = { it.id }) { item ->
+                    sessionItems(sessions) { item ->
                         val isSelected = selectedEventIds.contains(item.id)
                         SnoreEventCard(
                             event = item,
