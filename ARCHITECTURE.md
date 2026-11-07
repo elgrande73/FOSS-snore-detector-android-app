@@ -127,6 +127,7 @@ graph TB
 | **`MainActivity`** | Compose / AndroidX | Single-activity container, dynamic permission orchestrator (`RECORD_AUDIO`, `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT`). | Compose UI hierarchy, `ActivityResultContracts` |
 | **`SnoreViewModel`** | ViewModel / Coroutines | Exposes UI state, manages `SharedPreferences` persistence for DSP sliders, coordinates SAF export intents. | `StateFlow`, `viewModelScope`, `SnoreRepository` |
 | **`SnoreDetectionService`** | Foreground Service | Maintains `AudioRecord` read loop, orchestrates WakeLock, controls notification channel, integrates DSP results. | `AudioRecord.read()`, `NotificationManager` |
+| **`MonitorControl`** / **`MonitorControlActivity`** | Activity / SharedPreferences | Builds the service start intent from saved settings for the UI and automation apps. The invisible exported activity accepts start and stop actions once the user opts in. | `ACTION_START_MONITORING`, `ACTION_STOP_MONITORING` |
 | **`AudioInputManager`** | Android HAL API | Probes physical microphone endpoints, initiates Bluetooth SCO / `setCommunicationDevice`, handles fallback to built-in mic. | `AudioManager.getDevices()`, `AudioDeviceInfo` |
 | **`MediaPlaybackDetector`**| Android Audio API | Identifies active music/podcast playback on `STREAM_MUSIC` to suspend triggers during sleep-listening. | `AudioPlaybackCallback`, `isMusicActive()` |
 | **`SnoreAnalyzer`** | Pure Kotlin DSP | Performs frame-by-frame 1024-point time-domain and frequency-domain metric extraction and threshold evaluation. | `analyze(shortSamples, config): AnalysisResult` |
@@ -325,6 +326,8 @@ stateDiagram-v2
    `PowerManager.WakeLock` (`PowerManager.PARTIAL_WAKE_LOCK`, tag: `SnoreDetector:WakeLock`) is acquired at session launch with an absolute safety timeout of 12 hours (`12 * 60 * 60 * 1000L`). This prevents CPU sleep when the screen turns off.
 3. **Hardware Routing Resiliency**:
    If a Bluetooth headset or USB adapter disconnects during the night, `AudioInputManager` traps the routing change and falls back to `TYPE_BUILTIN_MIC` without terminating the foreground service.
+4. **Starting Without The UI**:
+   A microphone foreground service may only start while the app is in the foreground: API 31+ refuses background starts and API 30+ withholds the microphone from them. `MonitorControlActivity` is therefore an activity rather than a broadcast receiver. It is resumed for a moment, showing over the lock screen and turning the screen on if needed, starts the service from `onResume()`, and finishes. Stop requests need none of this and finish in `onCreate()`.
 
 ---
 
@@ -464,6 +467,7 @@ graph TD
 ### Security & Privacy Verifications
 - **Complete Air-Gap Isolation**: The `android.permission.INTERNET` permission is **explicitly omitted from `AndroidManifest.xml`**. The app cannot transmit data to the network.
 - **Service Isolation**: `SnoreDetectionService` is configured with `android:exported="false"`, preventing other applications from binding to or hijacking the audio recording pipeline.
+- **Automation Boundary**: `MonitorControlActivity` is exported so that automation apps can reach it, and does nothing unless the user enables Automation Control (off by default, and turned off by "Restore All Defaults"). It accepts only the start and stop actions, ignores the caller's extras so sessions always use saved settings, and returns no data. Monitoring still shows its ongoing notification.
 - **Sandboxed Storage**: All SQLite data and `.wav` audio snippets are stored in internal private app storage (`context.filesDir`), inaccessible to non-root applications.
 - **Export via Content URIs**: Shared audio files use standard Android `FileProvider` with temporary single-target URI grants (`FLAG_GRANT_READ_URI_PERMISSION`).
 

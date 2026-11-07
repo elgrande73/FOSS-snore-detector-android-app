@@ -21,6 +21,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
 * **Audio Input Selection** 
   Choose the microphone used for detection, including Bluetooth, USB, or the built-in mic, with automatic device discovery and fallback. Bluetooth input is designed to work alongside media playback and controls.
 
+* **Screen-Free Start and Stop**
+  Optional Automation Control setting lets apps such as Tasker or MacroDroid start and stop monitoring, for example from a button, a timer, or a Bluetooth device. See [Automation](#-automation).
+
 * **100% On-Device & Private**
   Zero external network calls or tracking analytics. Your audio and sleep data never leave your device.
 
@@ -38,6 +41,26 @@ Designed from the ground up for privacy and performance, all digital signal proc
 
 * **Modern Material 3 UI**
   Built with Jetpack Compose following the Sleek Interface theme, edge-to-edge layout, and dark/light adaptive design.
+
+---
+
+## 🤖 Automation
+
+Turn on **Settings → Automation Control**, then have your automation app send an intent with the target set to **Activity**:
+
+| Field | Value |
+| :--- | :--- |
+| Package | `com.aistudio.snoredetector.afkwd` |
+| Class | `com.aistudio.snoredetector.afkwd.service.MonitorControlActivity` |
+| Start action | `com.aistudio.snoredetector.afkwd.action.START_MONITORING` |
+| Stop action | `com.aistudio.snoredetector.afkwd.action.STOP_MONITORING` |
+
+Sessions always use the settings saved in the app, and any extras in the intent are ignored.
+
+* The automation app needs the **Display over other apps** permission, otherwise Android blocks the request without an error.
+* A broadcast will not work: Android only allows microphone recording to begin while the app is in the foreground, so the target has to be an activity.
+* Starting from a sleeping phone turns the screen on for a moment, for the same reason.
+* While Automation Control is on, any app installed on the phone can start or stop monitoring. It cannot read your recordings or history.
 
 ---
 
