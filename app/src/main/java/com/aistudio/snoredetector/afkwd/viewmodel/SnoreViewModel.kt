@@ -24,6 +24,7 @@ import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.service.MonitorControl
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +46,7 @@ import java.util.Locale
 class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
-    private val prefs = context.getSharedPreferences("snore_detector_preferences", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(MonitorControl.PREFS_NAME, Context.MODE_PRIVATE)
     private val repository: SnoreRepository
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
@@ -136,6 +137,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _ignoreDuringMediaPlayback = MutableStateFlow(prefs.getBoolean("ignoreDuringMediaPlayback", true))
     val ignoreDuringMediaPlayback = _ignoreDuringMediaPlayback.asStateFlow()
 
+    private val _automationControlEnabled = MutableStateFlow(prefs.getBoolean(MonitorControl.PREF_AUTOMATION_ENABLED, false))
+    val automationControlEnabled = _automationControlEnabled.asStateFlow()
+
     // Material 3 / Material You Theme Preferences
     private val savedThemeModeStr = prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
     private val _themeMode = MutableStateFlow(
@@ -220,33 +224,11 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     // --- SERVICE CONTROLS ---
 
     fun startServiceDetection() {
-        val intent = Intent(context, SnoreDetectionService::class.java).apply {
-            putExtra("saveAudioClips", _saveAudioClips.value)
-            putExtra("notifyOnSnore", _notifyOnSnore.value)
-            putExtra("audioInputId", _selectedAudioInputId.value)
-            putExtra("audioInputName", _selectedAudioInputName.value)
-            putExtra("useRms", _useRms.value)
-            putExtra("rmsDbThreshold", _rmsDbThreshold.value)
-            putExtra("useZcr", _useZcr.value)
-            putExtra("zcrThreshold", _zcrThreshold.value)
-            putExtra("useBandEnergy", _useBandEnergy.value)
-            putExtra("bandEnergyThreshold", _bandEnergyThreshold.value)
-            putExtra("useLowFreqRatio", _useLowFreqRatio.value)
-            putExtra("lowFreqRatioThreshold", _lowFreqRatioThreshold.value)
-            putExtra("minDurationSeconds", _minDurationSeconds.value)
-            putExtra("ignoreDuringMediaPlayback", _ignoreDuringMediaPlayback.value)
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
+        MonitorControl.startMonitoring(context)
     }
 
     fun stopServiceDetection() {
-        val intent = Intent(context, SnoreDetectionService::class.java)
-        context.stopService(intent)
+        MonitorControl.stopMonitoring(context)
     }
 
     // --- AUDIO INPUT DEVICE METHODS ---
@@ -365,6 +347,11 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateAutomationControlEnabled(value: Boolean) {
+        _automationControlEnabled.value = value
+        prefs.edit().putBoolean(MonitorControl.PREF_AUTOMATION_ENABLED, value).apply()
+    }
+
     fun updateThemeMode(mode: com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode) {
         _themeMode.value = mode
         prefs.edit().putString("themeMode", mode.name).apply()
@@ -392,6 +379,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateIgnoreDuringMediaPlayback(defaultConfig.ignoreDuringMediaPlayback)
         updateSaveAudioClips(true)
         updateNotifyOnSnore(false)
+        updateAutomationControlEnabled(false)
         updateSelectedAudioInput(AudioInputDevice.DEFAULT_DEVICE)
         updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
         updateDynamicColor(true)

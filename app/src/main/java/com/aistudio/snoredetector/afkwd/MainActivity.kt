@@ -116,6 +116,7 @@ import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
+import com.aistudio.snoredetector.afkwd.ui.AutomationSettingsCard
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
@@ -2478,6 +2479,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
     val ignoreDuringMediaPlayback by viewModel.ignoreDuringMediaPlayback.collectAsState()
     val saveAudioClips by viewModel.saveAudioClips.collectAsState()
     val notifyOnSnore by viewModel.notifyOnSnore.collectAsState()
+    val automationControlEnabled by viewModel.automationControlEnabled.collectAsState()
 
     val availableInputDevices by viewModel.availableInputDevices.collectAsState()
     val selectedAudioInputId by viewModel.selectedAudioInputId.collectAsState()
@@ -3107,6 +3109,14 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                 }
             }
 
+            // Opt-in for starting and stopping monitoring from automation apps
+            item(key = "settings_automation_control") {
+                AutomationSettingsCard(
+                    enabled = automationControlEnabled,
+                    onEnabledChange = { viewModel.updateAutomationControlEnabled(it) }
+                )
+            }
+
             // Material You / Material 3 Theme Appearance Card
             item(key = "settings_theme_card") {
                 Card(
@@ -3246,7 +3256,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                             )
                         }
                         Text(
-                            text = "Restore all 4 DSP acoustic filters, threshold parameters, minimum duration condition (1.0s), audio recording preference, microphone input source selection, and appearance settings back to their source-of-truth defaults.",
+                            text = "Restore all 4 DSP acoustic filters, threshold parameters, minimum duration condition (1.0s), audio recording preference, microphone input source selection, automation control, and appearance settings back to their source-of-truth defaults.",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3318,7 +3328,7 @@ fun SettingsTab(viewModel: SnoreViewModel) {
             },
             text = {
                 Text(
-                    text = "This will reset all detection parameters, acoustic thresholds, audio recording preferences, microphone input selection, and theming options to their original default values. Your recorded history logs will not be affected.",
+                    text = "This will reset all detection parameters, acoustic thresholds, audio recording preferences, microphone input selection, automation control, and theming options to their original default values. Your recorded history logs will not be affected.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
