@@ -88,6 +88,42 @@ class SnoreDetectionService : Service() {
         fun selectAudioSource(isBluetoothTarget: Boolean): Int =
             if (isBluetoothTarget) MediaRecorder.AudioSource.VOICE_RECOGNITION else MediaRecorder.AudioSource.MIC
 
+        /**
+         * Whether a Bluetooth microphone should give up its communication route for now.
+         *
+         * Bluetooth Classic headsets cannot carry A2DP media while the SCO/HFP link that the
+         * microphone needs is up, so holding the route can silence playback (issue #8). While
+         * triggers are paused for media every captured sample is discarded anyway, so the route
+         * costs the listener their audio and gives detection nothing. With the pause disabled the
+         * microphone is in use and the route has to stay.
+         */
+        fun shouldYieldBluetoothRoute(
+            isBluetoothTarget: Boolean,
+            ignoreDuringMediaPlayback: Boolean,
+            isMediaPlaying: Boolean
+        ): Boolean = isBluetoothTarget && ignoreDuringMediaPlayback && isMediaPlaying
+
+        /**
+         * Suspends until [isStandingBy] has stayed false for [graceMillis].
+         *
+         * The grace period keeps the gap between two tracks from bringing the SCO link up and
+         * interrupting the next track.
+         */
+        suspend fun awaitMediaStandbyEnd(
+            pollMillis: Long = MEDIA_STANDBY_POLL_MS,
+            graceMillis: Long = MEDIA_STANDBY_GRACE_MS,
+            isStandingBy: () -> Boolean
+        ) {
+            var idleMillis = 0L
+            while (idleMillis < graceMillis) {
+                delay(pollMillis)
+                idleMillis = if (isStandingBy()) 0L else idleMillis + pollMillis
+            }
+        }
+
+        private const val MEDIA_STANDBY_POLL_MS = 350L
+        private const val MEDIA_STANDBY_GRACE_MS = 5000L
+
         const val NOTIFICATION_ID = 54321
         const val EVENT_NOTIFICATION_ID = 54322
         const val CHANNEL_ID = "snore_detector_service_channel"
@@ -255,7 +291,23 @@ class SnoreDetectionService : Service() {
             return
         }
 
-        recordingJob = serviceScope.launch(Dispatchers.Default) {
+        recordingJob = serviceScope.launchCapture(resumingAfterMediaStandby = false)
+    }
+
+    /**
+     * Queries the system rather than the collected flow, which lags behind when a session starts.
+     */
+    private fun isBluetoothRouteYieldedToMedia(isBluetoothTarget: Boolean): Boolean {
+        val isMediaPlaying = mediaPlaybackDetector?.checkCurrentPlaybackState()?.isMediaPlaying ?: false
+        return shouldYieldBluetoothRoute(isBluetoothTarget, currentConfig.ignoreDuringMediaPlayback, isMediaPlaying)
+    }
+
+    /**
+     * Runs one capture pass. A Bluetooth pass that yields to media restarts as a child coroutine,
+     * so cancelling [recordingJob] always reaches whichever pass is current.
+     */
+    private fun CoroutineScope.launchCapture(resumingAfterMediaStandby: Boolean): Job =
+        launch(Dispatchers.Default) {
             val sampleRate = 16000
             val channelConfig = AudioFormat.CHANNEL_IN_MONO
             val audioFormat = AudioFormat.ENCODING_PCM_16BIT
@@ -270,6 +322,19 @@ class SnoreDetectionService : Service() {
             } else null
 
             val isBluetoothTarget = targetDeviceInfo != null && AudioInputManager.isBluetoothType(targetDeviceInfo.type)
+
+            // Stay off the Bluetooth link while media plays. Nothing is recorded here, the same state
+            // as having no session, and the device is resolved again once the media has finished.
+            if (isBluetoothRouteYieldedToMedia(isBluetoothTarget)) {
+                Log.i(TAG, "Media playing with triggers paused. Releasing Bluetooth communication routing until it stops.")
+                AudioInputManager.disableBluetoothCommunicationRouting(applicationContext)
+                _isDetectionSuspendedForMedia.value = true
+                _liveAnalysis.value = null
+                updateNotification("Media playback active — Detection on standby")
+                awaitMediaStandbyEnd { isBluetoothRouteYieldedToMedia(isBluetoothTarget) }
+                launchCapture(resumingAfterMediaStandby = true)
+                return@launch
+            }
 
             // Setup or clear Bluetooth communication routing (SCO / communication device)
             if (isBluetoothTarget) {
@@ -476,7 +541,11 @@ class SnoreDetectionService : Service() {
             // Temporary timeline accumulation trackers
             var timelineTimer = 0L
             val accumulatedTimelinePoints = mutableListOf<AmplitudePoint>()
-            _currentSessionData.value = emptyList() // clear previous session data
+            if (resumingAfterMediaStandby) {
+                accumulatedTimelinePoints.addAll(_currentSessionData.value)
+            } else {
+                _currentSessionData.value = emptyList() // clear previous session data
+            }
 
             // Snore state machine variables
             var isSnoringActive = false
@@ -500,6 +569,7 @@ class SnoreDetectionService : Service() {
             var diagnosticFrameCount = 0
             var consecutiveZeroFrames = 0
             var lastPlaybackPollMillis = 0L
+            var yieldedToMedia = false
 
             try {
                 while (isActive && isRecording.get()) {
@@ -566,6 +636,11 @@ class SnoreDetectionService : Service() {
                         snoreAudioBuffer.clear()
                         _isCurrentlySnoring.value = false
                         updateNotification("Media playback active — Detection on standby")
+                    }
+
+                    if (isMediaActive && isBluetoothTarget) {
+                        yieldedToMedia = true
+                        break
                     }
 
                     // Diagnostic logging every ~5 seconds (~75 frames)
@@ -781,8 +856,11 @@ class SnoreDetectionService : Service() {
                 }
                 Log.d(TAG, "Record thread loop finished & hardware released safely")
             }
+
+            if (yieldedToMedia) {
+                launchCapture(resumingAfterMediaStandby = true)
+            }
         }
-    }
 
     private fun attachAudioEffects(audioSessionId: Int) {
         releaseAudioEffects()
