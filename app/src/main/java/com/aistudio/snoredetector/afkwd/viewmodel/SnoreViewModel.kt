@@ -24,6 +24,7 @@ import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.service.MonitoringInterruptions
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -194,6 +195,8 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         if (prefs.contains("useRms")) {
             prefs.edit().putBoolean("useRms", true).apply()
         }
+
+        MonitoringInterruptions.reportAbandonedSession(context)
 
         // Bind timeline state combining either background service data (in-progress) or our saved historical timeline
         timelineDisplayState = combine(
