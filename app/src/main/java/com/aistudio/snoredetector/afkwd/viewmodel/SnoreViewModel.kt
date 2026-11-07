@@ -1,8 +1,10 @@
 package com.aistudio.snoredetector.afkwd.viewmodel
 
+import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -12,10 +14,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aistudio.snoredetector.afkwd.audio.AudioInputDevice
 import com.aistudio.snoredetector.afkwd.audio.AudioInputManager
+import com.aistudio.snoredetector.afkwd.audio.AudioRecordSetupCheckSource
+import com.aistudio.snoredetector.afkwd.audio.SetupCheckController
 import com.aistudio.snoredetector.afkwd.data.AppDatabase
 import com.aistudio.snoredetector.afkwd.data.AudioExportManager
 import com.aistudio.snoredetector.afkwd.data.ErrorLog
@@ -24,6 +29,7 @@ import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.dsp.DetectionConfig
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -219,7 +225,10 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- SERVICE CONTROLS ---
 
-    fun startServiceDetection() {
+    // The setup check holds the microphone, so monitoring only starts once it has let go.
+    fun startServiceDetection() = setupCheck.stopThen { launchDetectionService() }
+
+    private fun launchDetectionService() {
         val intent = Intent(context, SnoreDetectionService::class.java).apply {
             putExtra("saveAudioClips", _saveAudioClips.value)
             putExtra("notifyOnSnore", _notifyOnSnore.value)
@@ -247,6 +256,37 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     fun stopServiceDetection() {
         val intent = Intent(context, SnoreDetectionService::class.java)
         context.stopService(intent)
+    }
+
+    // --- SETUP CHECK ---
+
+    val setupCheck = SetupCheckController(
+        scope = viewModelScope,
+        isMonitoring = SnoreDetectionService.isServiceRunning,
+        hasMicPermission = {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        },
+        openSource = {
+            AudioRecordSetupCheckSource.open(context, _selectedAudioInputId.value, _selectedAudioInputName.value)
+        }
+    )
+
+    fun startSetupCheck() {
+        setupCheck.start(
+            DetectionConfig(
+                useRms = true,
+                useZcr = _useZcr.value,
+                useBandEnergy = _useBandEnergy.value,
+                useLowFreqRatio = _useLowFreqRatio.value,
+                rmsDbThreshold = _rmsDbThreshold.value,
+                zcrThreshold = _zcrThreshold.value,
+                bandEnergyThreshold = _bandEnergyThreshold.value,
+                lowFreqRatioThreshold = _lowFreqRatioThreshold.value,
+                minDurationSeconds = _minDurationSeconds.value,
+                ignoreDuringMediaPlayback = _ignoreDuringMediaPlayback.value
+            )
+        )
     }
 
     // --- AUDIO INPUT DEVICE METHODS ---

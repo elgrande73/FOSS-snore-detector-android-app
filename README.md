@@ -30,6 +30,9 @@ Designed from the ground up for privacy and performance, all digital signal proc
 * **Local Event Logging**
   Records detected snoring episodes with timestamps, peak sound volume (dB), duration, and acoustic metrics.
 
+* **Setup Check**
+  A 30-second test in Settings shows your background noise level and whether a test sound passes each detection criterion. Nothing is saved.
+
 * **Audio Clip Capturing**
   Option to record and save short `.wav` clips of snoring episodes for playback directly within the app history.
 

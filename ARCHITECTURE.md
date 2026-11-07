@@ -129,6 +129,8 @@ graph TB
 | **`SnoreDetectionService`** | Foreground Service | Maintains `AudioRecord` read loop, orchestrates WakeLock, controls notification channel, integrates DSP results. | `AudioRecord.read()`, `NotificationManager` |
 | **`AudioInputManager`** | Android HAL API | Probes physical microphone endpoints, initiates Bluetooth SCO / `setCommunicationDevice`, handles fallback to built-in mic. | `AudioManager.getDevices()`, `AudioDeviceInfo` |
 | **`MediaPlaybackDetector`**| Android Audio API | Identifies active music/podcast playback on `STREAM_MUSIC` to suspend triggers during sleep-listening. | `AudioPlaybackCallback`, `isMusicActive()` |
+| **`SetupCheckController`** | Coroutines | Runs the 30-second setup check from Settings over its own short `AudioRecord` (same input routing and audio source as the service), never alongside monitoring, and releases the microphone on every exit path. | `start()`, `stopThen()`, `SetupCheckAudioSource` |
+| **`SetupCheckAccumulator`** | Pure Kotlin | Turns `SnoreAnalyzer` results into a noise floor and a pass/fail per detection criterion, using the service's event rules. | `add()`, `report(): SetupCheckReport` |
 | **`SnoreAnalyzer`** | Pure Kotlin DSP | Performs frame-by-frame 1024-point time-domain and frequency-domain metric extraction and threshold evaluation. | `analyze(shortSamples, config): AnalysisResult` |
 | **`FFT`** | In-place Algorithm | Cooley-Tukey Radix-2 Fast Fourier Transform computing discrete frequency magnitudes across 512 frequency bins. | `fft(real[], imag[])` |
 | **`WavWriter`** | Java I/O | Encodes 16-bit 16kHz PCM frames into RIFF/WAVE header and data chunks. | `saveWavFile(File, sampleRate, List<ShortArray>)` |
@@ -415,6 +417,7 @@ graph TD
 | **Live Timeline Decibels**| StateFlow (`List<AmplitudePoint>`) | **Session Scope**: Cleared when a new recording starts. | **Never** |
 | **Snore Incidents (Metrics)**| SQLite (`snore_events` table) | **Persistent**: Retained until user deletes manually or clears app data. | **Only via User-Initiated SAF Export** |
 | **Audio Incident Clips (.wav)**| App Internal Storage (`filesDir/snore_recordings/`)| **Persistent**: Retained until user deletes records or toggles saving off. | **Only via User-Initiated SAF / Share Intent** |
+| **Setup Check Audio** | RAM only (analysis results, no samples kept) | **Transient**: Discarded when the check ends. | **Never** |
 | **System Error Logs** | SQLite (`system_error_logs` table) | **Persistent**: Anonymized local logs for on-device diagnostics. | **Only via User-Initiated Share/Export** |
 | **DSP Preferences** | `SharedPreferences` | **Persistent**: Maintained across app updates. | **Never** |
 
