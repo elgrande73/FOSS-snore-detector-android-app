@@ -257,6 +257,20 @@ fun GuideTab() {
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Schedule & Auto-Stop:",
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Under Settings → Schedule & Auto-Stop you can get a reminder on selected days and have monitoring stop by itself.\n\nAndroid doesn't let apps turn on the microphone from the background, so monitoring can't start entirely on its own. At the set time you get a notification: tap it and monitoring starts. Without permission for exact alarms, the reminder can arrive later than the set time.\n\nAutomatic stop works at a set time or after a duration, also for sessions you start by hand. A stop time earlier than the session start means the next morning. Whatever you choose, every session stops after 12 hours at the latest.",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 

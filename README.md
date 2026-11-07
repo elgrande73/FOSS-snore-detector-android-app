@@ -55,7 +55,7 @@ Snore Detector adheres strictly to F-Droid Free and Open Source Software guideli
   Built strictly with standard open-source Android Jetpack, Kotlin Coroutines, and Room libraries.
 
 * **Offline First**
-  Requires only the `RECORD_AUDIO` and `FOREGROUND_SERVICE` permissions to function locally.
+  Requires only the `RECORD_AUDIO` and `FOREGROUND_SERVICE` permissions to function locally. The optional schedule reminder also uses `RECEIVE_BOOT_COMPLETED` and `SCHEDULE_EXACT_ALARM`.
 
 ---
 

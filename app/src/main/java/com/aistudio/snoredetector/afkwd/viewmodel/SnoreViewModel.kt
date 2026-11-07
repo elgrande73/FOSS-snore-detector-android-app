@@ -24,6 +24,8 @@ import com.aistudio.snoredetector.afkwd.data.ExportSummary
 import com.aistudio.snoredetector.afkwd.data.SnoreEvent
 import com.aistudio.snoredetector.afkwd.data.SnoreRepository
 import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
+import com.aistudio.snoredetector.afkwd.schedule.ScheduleAlarms
+import com.aistudio.snoredetector.afkwd.schedule.ScheduleSettings
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -136,6 +138,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
     private val _ignoreDuringMediaPlayback = MutableStateFlow(prefs.getBoolean("ignoreDuringMediaPlayback", true))
     val ignoreDuringMediaPlayback = _ignoreDuringMediaPlayback.asStateFlow()
 
+    private val _scheduleSettings = MutableStateFlow(ScheduleSettings.load(prefs))
+    val scheduleSettings = _scheduleSettings.asStateFlow()
+
     // Material 3 / Material You Theme Preferences
     private val savedThemeModeStr = prefs.getString("themeMode", "SYSTEM") ?: "SYSTEM"
     private val _themeMode = MutableStateFlow(
@@ -189,6 +194,9 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
 
         // Load cached last-measurement points from disk if any
         loadLastSavedTimelineOffline()
+
+        // Alarms don't survive a force-stop, and no broadcast announces the return from one
+        ScheduleAlarms.reschedule(context)
 
         // Safely handle/migrate legacy useRms setting: amplitude dB criterion is always enabled
         if (prefs.contains("useRms")) {
@@ -365,6 +373,15 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateScheduleSettings(value: ScheduleSettings) {
+        _scheduleSettings.value = value
+        value.saveTo(prefs)
+        ScheduleAlarms.reschedule(context)
+        if (SnoreDetectionService.isServiceRunning.value) {
+            startServiceDetection()
+        }
+    }
+
     fun updateThemeMode(mode: com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode) {
         _themeMode.value = mode
         prefs.edit().putString("themeMode", mode.name).apply()
@@ -395,6 +412,7 @@ class SnoreViewModel(application: Application) : AndroidViewModel(application) {
         updateSelectedAudioInput(AudioInputDevice.DEFAULT_DEVICE)
         updateThemeMode(com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode.SYSTEM)
         updateDynamicColor(true)
+        updateScheduleSettings(ScheduleSettings())
     }
 
     // --- PLAYBACK CONTROLS ---

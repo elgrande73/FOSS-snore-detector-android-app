@@ -34,6 +34,9 @@ import com.aistudio.snoredetector.afkwd.dsp.AnalysisResult
 import com.aistudio.snoredetector.afkwd.dsp.DetectionConfig
 import com.aistudio.snoredetector.afkwd.dsp.SnoreAnalyzer
 import com.aistudio.snoredetector.afkwd.dsp.WavWriter
+import com.aistudio.snoredetector.afkwd.schedule.ScheduleSettings
+import com.aistudio.snoredetector.afkwd.schedule.ScheduleTime
+import com.aistudio.snoredetector.afkwd.schedule.StopPlan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -45,6 +48,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -73,6 +77,8 @@ class SnoreDetectionService : Service() {
     private var selectedAudioInputName: String = ""
     private var currentConfig = DetectionConfig()
     private var startTimeMillis: Long = 0L
+    private var autoStopJob: Job? = null
+    @Volatile private var stopPlan: StopPlan? = null
 
     companion object {
         private const val TAG = "SnoreService"
@@ -90,11 +96,12 @@ class SnoreDetectionService : Service() {
 
         const val NOTIFICATION_ID = 54321
         const val EVENT_NOTIFICATION_ID = 54322
+        const val SAFETY_STOP_NOTIFICATION_ID = 54323
         const val CHANNEL_ID = "snore_detector_service_channel"
         const val CHANNEL_EVENT_ID = "snore_detector_events_channel"
 
         // Duration of background operation limit: 12 Hours
-        private const val LIMIT_DURATION_MS = 12 * 60 * 60 * 1000L
+        private const val LIMIT_DURATION_MS = ScheduleTime.SAFETY_LIMIT_MS
 
         // Singleton Flows for real-time Dashboard UI consumption
         private val _isServiceRunning = MutableStateFlow(false)
@@ -226,20 +233,40 @@ class SnoreDetectionService : Service() {
         // Start real-time audio capturing & analysis
         startAudioCapture()
 
-        // Setup automatic 12-hour timeout monitor
-        serviceScope.launch {
+        // Every settings change while running arrives here too, so the plan always follows the settings
+        updateAutoStop()
+
+        return START_REDELIVER_INTENT
+    }
+
+    /**
+     * Recomputes when this session ends and makes sure a single monitor is watching that moment.
+     */
+    private fun updateAutoStop() {
+        stopPlan = ScheduleTime.stopPlan(
+            ScheduleSettings.load(applicationContext),
+            startTimeMillis,
+            System.currentTimeMillis(),
+            TimeZone.getDefault()
+        )
+        if (autoStopJob != null) return
+
+        autoStopJob = serviceScope.launch {
             while (isActive) {
-                delay(30000) // check every 30 seconds
-                val elapsed = System.currentTimeMillis() - startTimeMillis
-                if (elapsed >= LIMIT_DURATION_MS) {
-                    Log.d(TAG, "12-hour recording limit reached. Stopping automatically.")
+                val plan = stopPlan ?: break
+                val remaining = plan.stopAtMillis - System.currentTimeMillis()
+                if (remaining <= 0) {
+                    Log.d(TAG, "Automatic stop reached (safety limit: ${plan.isSafetyLimit}).")
+                    if (plan.isSafetyLimit) {
+                        sendSafetyStopNotification()
+                    }
                     stopSelf()
                     break
                 }
+                // Wake at least every 30 seconds to pick up changed settings or a changed clock
+                delay(remaining.coerceIn(1000L, 30000L))
             }
         }
-
-        return START_REDELIVER_INTENT
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -879,6 +906,41 @@ class SnoreDetectionService : Service() {
 
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(EVENT_NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Tells the user why the session ended. Stays silent on the low-importance channel: it is
+     * information for the morning, not worth waking someone up for.
+     */
+    private fun sendSafetyStopNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "POST_NOTIFICATIONS permission not granted; skipping safety limit notification")
+            return
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            3,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Snore Detector")
+            .setContentText("Monitoring stopped after 12 hours (safety limit)")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(SAFETY_STOP_NOTIFICATION_ID, notification)
     }
 
     private fun buildNotification(text: String): Notification {
