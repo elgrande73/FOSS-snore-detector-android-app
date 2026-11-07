@@ -1,5 +1,6 @@
 package com.aistudio.snoredetector.afkwd.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -72,6 +73,7 @@ class MediaPlaybackDetector(
         /**
          * Evaluate a list of AudioPlaybackConfigurations combined with isMusicActive.
          */
+        @SuppressLint("NewApi") // configs is only non-null on API 26+, the check above returns otherwise
         fun evaluatePlaybackState(
             configs: List<AudioPlaybackConfiguration>?,
             isMusicActive: Boolean
