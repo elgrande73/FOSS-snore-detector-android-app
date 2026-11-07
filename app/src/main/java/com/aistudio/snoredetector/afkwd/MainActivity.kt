@@ -178,12 +178,18 @@ class MainActivity : ComponentActivity() {
                 val permissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestMultiplePermissions()
                 ) { permissions ->
-                    hasMicPermission = permissions[Manifest.permission.RECORD_AUDIO] == true
+                    hasMicPermission = permissionAfterResult(
+                        permissions, Manifest.permission.RECORD_AUDIO, hasMicPermission
+                    )
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        hasNotificationPermission = permissions[Manifest.permission.POST_NOTIFICATIONS] == true
+                        hasNotificationPermission = permissionAfterResult(
+                            permissions, Manifest.permission.POST_NOTIFICATIONS, hasNotificationPermission
+                        )
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        hasBluetoothPermission = permissions[Manifest.permission.BLUETOOTH_CONNECT] == true
+                        hasBluetoothPermission = permissionAfterResult(
+                            permissions, Manifest.permission.BLUETOOTH_CONNECT, hasBluetoothPermission
+                        )
                     }
                     viewModel.refreshAvailableInputDevices()
                 }
@@ -283,6 +289,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/**
+ * A permission result only contains the permissions in that request, so a permission that
+ * wasn't requested keeps its current state instead of counting as denied.
+ */
+internal fun permissionAfterResult(
+    results: Map<String, Boolean>,
+    permission: String,
+    current: Boolean
+): Boolean = results[permission] ?: current
 
 @Composable
 fun PermissionExplanationScreen(onTriggerRequest: () -> Unit) {
