@@ -117,6 +117,9 @@ import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.MonitoringReliabilityBanner
+import com.aistudio.snoredetector.afkwd.ui.MonitoringReliabilityCard
+import com.aistudio.snoredetector.afkwd.ui.rememberMonitoringReliabilityState
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -356,6 +359,7 @@ fun DashboardTab(viewModel: SnoreViewModel) {
     val useLowFreqRatio by viewModel.useLowFreqRatio.collectAsState()
     
     val context = LocalContext.current
+    val reliability = rememberMonitoringReliabilityState()
 
     LaunchedEffect(errorMsg) {
         errorMsg?.let {
@@ -542,6 +546,12 @@ fun DashboardTab(viewModel: SnoreViewModel) {
                         }
                     }
                 }
+            }
+        }
+
+        if (reliability.hasBanner) {
+            item(key = "dashboard_monitoring_reliability") {
+                MonitoringReliabilityBanner(reliability)
             }
         }
 
@@ -2773,6 +2783,10 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                     minDurationSeconds = minDurationSeconds
                 )
             }
+        }
+
+        item(key = "settings_monitoring_reliability") {
+            MonitoringReliabilityCard()
         }
 
         // =========================================================================

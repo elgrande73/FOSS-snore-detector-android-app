@@ -74,6 +74,16 @@ class SnoreDetectionService : Service() {
     private var currentConfig = DetectionConfig()
     private var startTimeMillis: Long = 0L
 
+    private lateinit var sessionStore: MonitoringSessionStore
+    @Volatile
+    private var isSessionOpen = false
+    private var watchdogJob: Job? = null
+
+    // Set after a system restart until real audio arrives. Android 11+ can start a service from the
+    // background without giving it the microphone, which would pass for a quiet night.
+    @Volatile
+    private var awaitingAudioAfterRestart = false
+
     companion object {
         private const val TAG = "SnoreService"
 
@@ -91,10 +101,14 @@ class SnoreDetectionService : Service() {
         const val NOTIFICATION_ID = 54321
         const val EVENT_NOTIFICATION_ID = 54322
         const val CHANNEL_ID = "snore_detector_service_channel"
+        const val STOPPED_NOTIFICATION_ID = 54323
         const val CHANNEL_EVENT_ID = "snore_detector_events_channel"
 
         // Duration of background operation limit: 12 Hours
-        private const val LIMIT_DURATION_MS = 12 * 60 * 60 * 1000L
+        internal const val LIMIT_DURATION_MS = 12 * 60 * 60 * 1000L
+
+        // ~10 seconds of 64 ms frames. Real microphones are never digitally silent for this long.
+        private const val SILENT_RESTART_FRAME_LIMIT = 156
 
         // Singleton Flows for real-time Dashboard UI consumption
         private val _isServiceRunning = MutableStateFlow(false)
@@ -146,6 +160,7 @@ class SnoreDetectionService : Service() {
         // Initialize local Room repository
         val database = AppDatabase.getDatabase(applicationContext)
         repository = SnoreRepository(database.snoreDao(), database.errorLogDao())
+        sessionStore = MonitoringSessionStore(applicationContext)
 
         // Acquire WakeLock to hold CPU running continuously overnight
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -221,15 +236,24 @@ class SnoreDetectionService : Service() {
 
         // Setup Foreground Notification Channel and start foreground
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Ready to analyze..."))
+        val isInForeground = enterForeground()
+
+        if (!isSessionOpen && !openSession(flags, isInForeground)) {
+            _isServiceRunning.value = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // Start real-time audio capturing & analysis
         startAudioCapture()
 
-        // Setup automatic 12-hour timeout monitor
-        serviceScope.launch {
+        // Setup automatic 12-hour timeout monitor and session heartbeat.
+        // Every settings change lands here too, so replace the previous monitor instead of adding one.
+        watchdogJob?.cancel()
+        watchdogJob = serviceScope.launch {
             while (isActive) {
                 delay(30000) // check every 30 seconds
+                sessionStore.heartbeat(System.currentTimeMillis())
                 val elapsed = System.currentTimeMillis() - startTimeMillis
                 if (elapsed >= LIMIT_DURATION_MS) {
                     Log.d(TAG, "12-hour recording limit reached. Stopping automatically.")
@@ -244,6 +268,119 @@ class SnoreDetectionService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
+    }
+
+    /**
+     * Apps may not enter the foreground from the background on Android 12+, and a microphone service
+     * may not on Android 14+. Both apply to a system restart, where an unguarded call crashes the app.
+     */
+    private fun enterForeground(): Boolean = try {
+        startForeground(NOTIFICATION_ID, buildNotification("Ready to analyze..."))
+        true
+    } catch (e: IllegalStateException) {
+        Log.w(TAG, "Not allowed to enter the foreground", e)
+        false
+    } catch (e: SecurityException) {
+        Log.w(TAG, "Not allowed to enter the foreground", e)
+        false
+    }
+
+    /**
+     * Reconciles this start with whatever the previous process left behind.
+     * @return false when this start must not capture audio.
+     */
+    private fun openSession(flags: Int, isInForeground: Boolean): Boolean {
+        val now = System.currentTimeMillis()
+        val isSystemRestart = flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY) != 0
+
+        when (val start = decideSessionStart(sessionStore.activeSession(), isSystemRestart, now, LIMIT_DURATION_MS)) {
+            is SessionStart.Fresh -> {
+                start.abandoned?.let { recordGap(it, now) }
+                sessionStore.clear()
+                if (!isInForeground) {
+                    failForegroundStart()
+                    return false
+                }
+                sessionStore.begin(now)
+            }
+            is SessionStart.Resume -> {
+                val session = start.session
+                if (!isInForeground) {
+                    reportStoppedUnexpectedly(
+                        MonitoringInterruptions.restartRefusedMessage(session.lastActiveAt),
+                        session
+                    )
+                    return false
+                }
+                val message = MonitoringInterruptions.resumedMessage(session.lastActiveAt, now)
+                MonitoringInterruptions.record(applicationContext, sessionStore, message, session)
+                sessionStore.heartbeat(now)
+                startTimeMillis = session.startedAt
+                _sessionStartTime.value = session.startedAt
+                awaitingAudioAfterRestart = true
+            }
+            is SessionStart.Refuse -> {
+                start.expired?.let { recordGap(it, now) }
+                sessionStore.clear()
+                return false
+            }
+        }
+        isSessionOpen = true
+        return true
+    }
+
+    private fun recordGap(session: MonitoringSession, now: Long) {
+        val end = interruptionEnd(session, now, LIMIT_DURATION_MS)
+        val message = MonitoringInterruptions.gapMessage(session.lastActiveAt, end)
+        MonitoringInterruptions.record(applicationContext, sessionStore, message, session)
+    }
+
+    private fun failForegroundStart() {
+        val errorStr = "Android did not allow monitoring to start. Open the app and try again."
+        _serviceError.value = errorStr
+        ErrorLogger.log(
+            context = applicationContext,
+            errorType = "FOREGROUND_START_ERROR",
+            message = errorStr,
+            component = "Service"
+        )
+    }
+
+    /**
+     * Ends the session for good. The notification is deliberately on the quiet service channel:
+     * it should be there in the morning, not wake anyone up at the moment it happens.
+     */
+    private fun reportStoppedUnexpectedly(message: String, session: MonitoringSession?) {
+        MonitoringInterruptions.record(applicationContext, sessionStore, message, session)
+        sessionStore.clear()
+        isSessionOpen = false
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "POST_NOTIFICATIONS permission not granted; skipping stopped notification")
+            return
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            2,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Monitoring stopped unexpectedly")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(STOPPED_NOTIFICATION_ID, notification)
     }
 
     /**
@@ -539,8 +676,18 @@ class SnoreDetectionService : Service() {
 
                     if (hasNonZeroAudio) {
                         consecutiveZeroFrames = 0
+                        awaitingAudioAfterRestart = false
                     } else {
                         consecutiveZeroFrames++
+                        if (awaitingAudioAfterRestart && consecutiveZeroFrames >= SILENT_RESTART_FRAME_LIMIT) {
+                            reportStoppedUnexpectedly(
+                                MonitoringInterruptions.silentRestartMessage(currentMillis),
+                                sessionStore.activeSession()
+                            )
+                            _isServiceRunning.value = false
+                            stopSelf()
+                            break
+                        }
                     }
 
                     val frameSamples = audioBuffer.copyOf(readResult)
@@ -1020,6 +1167,11 @@ class SnoreDetectionService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service being destroyed")
+        // Only a stop that reaches this point is a clean one: a killed process leaves the session behind.
+        if (isSessionOpen) {
+            sessionStore.clear()
+            isSessionOpen = false
+        }
         mediaPlaybackDetector?.stopMonitoring()
         mediaPlaybackDetector = null
         stopAudioCapture()
