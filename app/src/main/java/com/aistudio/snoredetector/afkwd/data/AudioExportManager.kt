@@ -12,6 +12,7 @@ import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -72,6 +73,48 @@ object AudioExportManager {
                 "None"
             }
             csvBuilder.append("${e.timestamp},\"$formattedDate\",${e.durationSeconds},${e.maxDb},${e.maxRms},${e.meanZcr},${e.meanBandEnergy},${e.meanLowFreqRatio},\"$clipName\"\n")
+        }
+        return csvBuilder.toString()
+    }
+
+    /**
+     * Generates a CSV with one row per night. Score is empty when none could be calculated.
+     */
+    fun generateNightCsv(nights: List<NightSummary>): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val csvBuilder = StringBuilder()
+        csvBuilder.append(
+            "Night,Start,End,Sessions,Monitored_Minutes,Snore_Events,Snore_Minutes,Snore_Index_Min_Per_Hour," +
+                "Episodes_Per_Hour,Longest_Episode_Seconds,Avg_Peak_dB,Max_Peak_dB,Background_dB," +
+                "Above_Background_dB,Score,Status,App_Version,Detection_Settings\n"
+        )
+        fun decimal(value: Double?) = value?.let { String.format(Locale.US, "%.2f", it) } ?: ""
+
+        for (n in nights) {
+            val b = n.breakdown
+            csvBuilder.append(
+                listOf(
+                    dateFormat.format(Date(NightStats.epochDayToUtcMillis(n.epochDay))),
+                    "\"${sdf.format(Date(n.startTime))}\"",
+                    "\"${sdf.format(Date(n.endTime))}\"",
+                    n.sessionCount,
+                    decimal(n.monitoredMinutes),
+                    n.snoreEventCount,
+                    decimal(n.totalSnoreMinutes),
+                    decimal(b?.snoreIndex),
+                    decimal(b?.episodesPerHour),
+                    decimal(n.longestEpisodeSeconds),
+                    decimal(n.avgPeakDb?.toDouble()),
+                    decimal(n.maxPeakDb?.toDouble()),
+                    decimal(n.backgroundDb?.toDouble()),
+                    decimal(b?.loudnessAboveBackgroundDb),
+                    b?.score ?: "",
+                    n.status.name,
+                    n.appVersion ?: "",
+                    "\"${n.detectionSettings ?: ""}\""
+                ).joinToString(",")
+            ).append('\n')
         }
         return csvBuilder.toString()
     }
@@ -146,8 +189,24 @@ object AudioExportManager {
     }
 
     /**
+     * Exports the nightly summary CSV directly to a user-chosen Document Uri.
+     */
+    fun exportNightCsvToUri(context: Context, nights: List<NightSummary>, destinationUri: Uri): Boolean {
+        return try {
+            val csvText = generateNightCsv(nights)
+            context.contentResolver.openOutputStream(destinationUri)?.use { outStream ->
+                outStream.write(csvText.toByteArray(Charsets.UTF_8))
+                outStream.flush()
+            } != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error exporting nightly CSV to URI", e)
+            false
+        }
+    }
+
+    /**
      * Exports audio recordings into a ZIP package written to a Document Uri.
-     * Optionally includes the CSV index file if [includeCsv] is true.
+     * Optionally includes the CSV index file if [includeCsv] is true, and [nightlyCsv] next to it.
      */
     fun exportZipArchiveToUri(
         context: Context,
@@ -155,6 +214,7 @@ object AudioExportManager {
         destinationUri: Uri,
         includeCsv: Boolean = true,
         includeAudio: Boolean = true,
+        nightlyCsv: String? = null,
         onProgress: ((current: Int, total: Int) -> Unit)? = null
     ): ExportSummary {
         var exportedAudio = 0
@@ -173,6 +233,12 @@ object AudioExportManager {
                     zipOut.putNextEntry(csvEntry)
                     zipOut.write(csvContent.toByteArray(Charsets.UTF_8))
                     zipOut.closeEntry()
+
+                    if (nightlyCsv != null) {
+                        zipOut.putNextEntry(ZipEntry("nightly_summaries.csv"))
+                        zipOut.write(nightlyCsv.toByteArray(Charsets.UTF_8))
+                        zipOut.closeEntry()
+                    }
                 }
 
                 // 2. Optionally write audio files in audio/ subfolder

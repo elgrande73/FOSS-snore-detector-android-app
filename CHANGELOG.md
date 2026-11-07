@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- Monitoring sessions are now saved, with start, end, monitored time and summary values. Nights recorded before this update are grouped by date but have no score, because their monitored time was never recorded (#14).
+- New Stats tab with a nightly snore score from 0 to 100 (lower is better), an explanation of how it is calculated, a chart over a week, month, 3 months or a year with a 7-day average, markers for app updates and setting changes, and a comparison of the last 30 days with the 30 days before (#14).
+- Nightly summaries can be exported as CSV and are included in the full ZIP export as `nightly_summaries.csv` (#14).
+
+### Fixes
+
+- The snore in progress when monitoring stops is now saved instead of being dropped.
+
 ## 1.1.1
 
 ### Fixes
