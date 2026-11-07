@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- Settings > Backup & Restore: save your history, error logs, settings and optionally recordings to a `.zip` file anywhere the system file picker can reach, and restore it after a reinstall or on a new phone. A damaged or wrong file is refused and leaves your data untouched (#18).
+
+### Changes
+
+- Android's automatic cloud backup now only includes settings, never your history or recordings (#18).
+
 ## 1.1.1
 
 ### Fixes

@@ -134,6 +134,7 @@ graph TB
 | **`WavWriter`** | Java I/O | Encodes 16-bit 16kHz PCM frames into RIFF/WAVE header and data chunks. | `saveWavFile(File, sampleRate, List<ShortArray>)` |
 | **`AppDatabase` / `SnoreDao`** | Room / SQLite v3 | Local offline database storing individual snore events with full acoustic metrics and diagnostic error logs. | Room `@Dao`, `Flow<List<SnoreEvent>>` |
 | **`AudioExportManager`**| Java Zip / SAF | Streams database records and audio files into standardized ZIP and CSV formats via `DocumentUri`. | `ZipOutputStream`, `FileProvider` |
+| **`BackupManager`** | Java Zip / SAF / Room | Writes and restores full backups: a ZIP with a database snapshot, optional clips and a `backup.json` manifest with the settings. Restore validates the file and migrates a copy of the database, then replaces existing data in one transaction; a bad file changes nothing. | `ZipInputStream`, `Room`, `org.json` |
 
 ---
 
@@ -413,10 +414,10 @@ graph TD
 | :--- | :--- | :--- | :--- |
 | **Raw PCM Frame (64ms)** | In-Memory (`ShortArray`) | **Volatile**: Overwritten every ~64ms. | **Never** |
 | **Live Timeline Decibels**| StateFlow (`List<AmplitudePoint>`) | **Session Scope**: Cleared when a new recording starts. | **Never** |
-| **Snore Incidents (Metrics)**| SQLite (`snore_events` table) | **Persistent**: Retained until user deletes manually or clears app data. | **Only via User-Initiated SAF Export** |
-| **Audio Incident Clips (.wav)**| App Internal Storage (`filesDir/snore_recordings/`)| **Persistent**: Retained until user deletes records or toggles saving off. | **Only via User-Initiated SAF / Share Intent** |
-| **System Error Logs** | SQLite (`system_error_logs` table) | **Persistent**: Anonymized local logs for on-device diagnostics. | **Only via User-Initiated Share/Export** |
-| **DSP Preferences** | `SharedPreferences` | **Persistent**: Maintained across app updates. | **Never** |
+| **Snore Incidents (Metrics)**| SQLite (`snore_events` table) | **Persistent**: Retained until user deletes manually or clears app data. | **Only via User-Initiated SAF Export or Backup** |
+| **Audio Incident Clips (.wav)**| App Internal Storage (`filesDir/snore_clips/`)| **Persistent**: Retained until user deletes records or toggles saving off. | **Only via User-Initiated SAF / Share Intent or Backup** |
+| **System Error Logs** | SQLite (`error_logs` table) | **Persistent**: Anonymized local logs for on-device diagnostics. | **Only via User-Initiated Share/Export or Backup** |
+| **DSP Preferences** | `SharedPreferences` | **Persistent**: Maintained across app updates. | **Via User-Initiated Backup, and Android Auto Backup if enabled on the device** (the only app data allowed in `backup_rules.xml` / `data_extraction_rules.xml`) |
 
 ---
 

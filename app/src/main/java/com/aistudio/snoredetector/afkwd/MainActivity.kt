@@ -117,6 +117,7 @@ import com.aistudio.snoredetector.afkwd.dsp.AmplitudePoint
 import androidx.core.content.ContextCompat
 import com.aistudio.snoredetector.afkwd.service.SnoreDetectionService
 import com.aistudio.snoredetector.afkwd.ui.GuideTab
+import com.aistudio.snoredetector.afkwd.ui.BackupRestoreCard
 import com.aistudio.snoredetector.afkwd.ui.theme.MyApplicationTheme
 import com.aistudio.snoredetector.afkwd.ui.theme.ThemeMode
 import com.aistudio.snoredetector.afkwd.viewmodel.SnoreViewModel
@@ -3265,6 +3266,10 @@ fun SettingsTab(viewModel: SnoreViewModel) {
                         }
                     }
                 }
+            }
+
+            item(key = "settings_backup_card") {
+                BackupRestoreCard(viewModel)
             }
 
             // About & Version Information
